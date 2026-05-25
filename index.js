@@ -14,7 +14,10 @@
 // ABER: Bot-Rolle muss über den Rollen stehen, die er vergeben soll.
 // ABER: Bot-Rolle muss über User-Rollen stehen, deren Nickname er ändern soll.
 //
-// FIX: Sanktionen aus derselben Kategorie werden jetzt gesammelt und nicht mehr ersetzt.
+// FIX: Sanktionen aus derselben Kategorie werden gesammelt und nicht ersetzt.
+// UPDATE: Sanktionen können jetzt storniert/gelöscht werden.
+// UPDATE: Leader-Logs wurden schöner formatiert.
+// UPDATE: Überschrift ist jetzt 🚫 SANKTION 🚫.
 //
 // Leader/Sanktionsrechte:
 // Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
@@ -809,6 +812,9 @@ function createSanctionRecord({ targetUserId, leaderId, selectedSanctions, guild
     paid: false,
     paidAt: null,
     paidBy: null,
+    cancelled: false,
+    cancelledAt: null,
+    cancelledBy: null,
     warnedOverdue: false,
     messageId: null,
   };
@@ -827,15 +833,25 @@ function createSanctionEmbed(record) {
     ? record.specials.join("\n")
     : "Keine";
 
-  const statusText = record.paid
-    ? `✅ Bezahlt von <@${record.paidBy}> am <t:${unixTimestamp(record.paidAt)}:F>`
-    : Date.now() >= record.dueAt
-      ? "⚠️ Überfällig"
-      : "⏳ Offen";
+  const statusText = record.cancelled
+    ? `❌ Storniert von <@${record.cancelledBy}> am <t:${unixTimestamp(record.cancelledAt)}:F>`
+    : record.paid
+      ? `✅ Bezahlt von <@${record.paidBy}> am <t:${unixTimestamp(record.paidAt)}:F>`
+      : Date.now() >= record.dueAt
+        ? "⚠️ Überfällig"
+        : "⏳ Offen";
+
+  const embedColor = record.cancelled
+    ? CONFIG.dangerColor
+    : record.paid
+      ? CONFIG.successColor
+      : Date.now() >= record.dueAt
+        ? CONFIG.dangerColor
+        : CONFIG.warningColor;
 
   return new EmbedBuilder()
-    .setColor(record.paid ? CONFIG.successColor : Date.now() >= record.dueAt ? CONFIG.dangerColor : CONFIG.warningColor)
-    .setTitle("⚠️ Verwarnung ⚠️")
+    .setColor(embedColor)
+    .setTitle("🚫 SANKTION 🚫")
     .addFields(
       {
         name: "Name",
@@ -883,13 +899,22 @@ function createSanctionEmbed(record) {
 }
 
 function createSanctionButtons(record) {
+  const isClosed = Boolean(record.paid || record.cancelled);
+
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`sanction_paid_${record.id}`)
       .setLabel(record.paid ? "Bereits bezahlt" : "Bezahlt markieren")
       .setEmoji("✅")
       .setStyle(ButtonStyle.Success)
-      .setDisabled(Boolean(record.paid))
+      .setDisabled(isClosed),
+
+    new ButtonBuilder()
+      .setCustomId(`sanction_cancel_${record.id}`)
+      .setLabel(record.cancelled ? "Storniert" : "Stornieren")
+      .setEmoji("❌")
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(isClosed)
   );
 }
 
@@ -954,13 +979,24 @@ async function createAndPostSanction(interaction, draft) {
   sanctionDrafts.delete(interaction.user.id);
 
   await sendToChannel(CONFIG.sanctionLogChannelId, {
-    content: [
-      "⚠️ **Neue Sanktion erstellt**",
-      `Name: <@${record.targetUserId}>`,
-      `Zu Bezahlen: **${record.total > 0 ? formatMoney(record.total) : "Keine feste Geldsumme"}**`,
-      `Frist: <t:${unixTimestamp(record.dueAt)}:F> (<t:${unixTimestamp(record.dueAt)}:R>)`,
-      `Ausgestellt von: <@${record.leaderId}>`,
-    ].join("\n"),
+    embeds: [
+      new EmbedBuilder()
+        .setColor(CONFIG.warningColor)
+        .setTitle("🚫 Neue Sanktion erstellt")
+        .setDescription(
+          [
+            "━━━━━━━━━━━━━━━━━━━━",
+            `**Name:** <@${record.targetUserId}>`,
+            `**Zu Bezahlen:** ${record.total > 0 ? `**${formatMoney(record.total)}**` : "**Keine feste Geldsumme**"}`,
+            `**Frist:** <t:${unixTimestamp(record.dueAt)}:F>`,
+            `**Restzeit:** <t:${unixTimestamp(record.dueAt)}:R>`,
+            `**Ausgestellt von:** <@${record.leaderId}>`,
+            `**Sanktion-ID:** \`${record.id}\``,
+            "━━━━━━━━━━━━━━━━━━━━",
+          ].join("\n")
+        )
+        .setFooter({ text: `${CONFIG.shortName} • Sanktionslog` }),
+    ],
   });
 
   return interaction.reply({
@@ -975,6 +1011,7 @@ async function checkOverdueSanctions() {
 
   for (const record of Object.values(data.sanctions || {})) {
     if (record.paid) continue;
+    if (record.cancelled) continue;
     if (record.warnedOverdue) continue;
     if (Date.now() < record.dueAt) continue;
 
@@ -982,14 +1019,24 @@ async function checkOverdueSanctions() {
     changed = true;
 
     await sendToChannel(CONFIG.sanctionLogChannelId, {
-      content: [
-        "🚨 **Sanktion überfällig**",
-        `Name: <@${record.targetUserId}>`,
-        `Zu Bezahlen: **${record.total > 0 ? formatMoney(record.total) : "Keine feste Geldsumme"}**`,
-        `Frist war: <t:${unixTimestamp(record.dueAt)}:F> (<t:${unixTimestamp(record.dueAt)}:R>)`,
-        `Ausgestellt von: <@${record.leaderId}>`,
-        `Sanktion-ID: \`${record.id}\``,
-      ].join("\n"),
+      embeds: [
+        new EmbedBuilder()
+          .setColor(CONFIG.dangerColor)
+          .setTitle("🚨 Sanktion überfällig")
+          .setDescription(
+            [
+              "━━━━━━━━━━━━━━━━━━━━",
+              `**Name:** <@${record.targetUserId}>`,
+              `**Zu Bezahlen:** ${record.total > 0 ? `**${formatMoney(record.total)}**` : "**Keine feste Geldsumme**"}`,
+              `**Frist war:** <t:${unixTimestamp(record.dueAt)}:F>`,
+              `**Überfällig seit:** <t:${unixTimestamp(record.dueAt)}:R>`,
+              `**Ausgestellt von:** <@${record.leaderId}>`,
+              `**Sanktion-ID:** \`${record.id}\``,
+              "━━━━━━━━━━━━━━━━━━━━",
+            ].join("\n")
+          )
+          .setFooter({ text: `${CONFIG.shortName} • Sanktionslog` }),
+      ],
     });
 
     await updateSanctionMessage(record).catch(() => {});
@@ -1363,6 +1410,66 @@ client.on("interactionCreate", async (interaction) => {
       return createAndPostSanction(interaction, draft);
     }
 
+    if (interaction.isButton() && interaction.customId.startsWith("sanction_cancel_")) {
+      const sanctionId = interaction.customId.replace("sanction_cancel_", "");
+      const data = loadData();
+      const record = data.sanctions[sanctionId];
+
+      if (!record) {
+        return interaction.reply({
+          content: "❌ Diese Sanktion wurde nicht im Speicher gefunden.",
+          ephemeral: true,
+        });
+      }
+
+      if (record.paid) {
+        return interaction.reply({
+          content: "ℹ️ Diese Sanktion wurde bereits als bezahlt markiert und kann nicht mehr storniert werden.",
+          ephemeral: true,
+        });
+      }
+
+      if (record.cancelled) {
+        return interaction.reply({
+          content: "ℹ️ Diese Sanktion wurde bereits storniert.",
+          ephemeral: true,
+        });
+      }
+
+      record.cancelled = true;
+      record.cancelledAt = Date.now();
+      record.cancelledBy = interaction.user.id;
+
+      data.sanctions[sanctionId] = record;
+      saveData(data);
+
+      await updateSanctionMessage(record);
+
+      await sendToChannel(CONFIG.sanctionLogChannelId, {
+        embeds: [
+          new EmbedBuilder()
+            .setColor(CONFIG.dangerColor)
+            .setTitle("❌ Sanktion storniert")
+            .setDescription(
+              [
+                "━━━━━━━━━━━━━━━━━━━━",
+                `**Name:** <@${record.targetUserId}>`,
+                `**Storniert von:** <@${interaction.user.id}>`,
+                `**Zeitpunkt:** <t:${unixTimestamp(record.cancelledAt)}:F>`,
+                `**Sanktion-ID:** \`${record.id}\``,
+                "━━━━━━━━━━━━━━━━━━━━",
+              ].join("\n")
+            )
+            .setFooter({ text: `${CONFIG.shortName} • Sanktionslog` }),
+        ],
+      });
+
+      return interaction.reply({
+        content: "✅ Sanktion wurde storniert.",
+        ephemeral: true,
+      });
+    }
+
     if (interaction.isButton() && interaction.customId.startsWith("sanction_paid_")) {
       const sanctionId = interaction.customId.replace("sanction_paid_", "");
       const data = loadData();
@@ -1382,6 +1489,13 @@ client.on("interactionCreate", async (interaction) => {
         });
       }
 
+      if (record.cancelled) {
+        return interaction.reply({
+          content: "ℹ️ Diese Sanktion wurde bereits storniert.",
+          ephemeral: true,
+        });
+      }
+
       record.paid = true;
       record.paidAt = Date.now();
       record.paidBy = interaction.user.id;
@@ -1392,13 +1506,22 @@ client.on("interactionCreate", async (interaction) => {
       await updateSanctionMessage(record);
 
       await sendToChannel(CONFIG.sanctionLogChannelId, {
-        content: [
-          "✅ **Sanktion bezahlt**",
-          `Name: <@${record.targetUserId}>`,
-          `Bezahlt markiert von: <@${interaction.user.id}>`,
-          `Zeitpunkt: <t:${unixTimestamp(record.paidAt)}:F>`,
-          `Sanktion-ID: \`${record.id}\``,
-        ].join("\n"),
+        embeds: [
+          new EmbedBuilder()
+            .setColor(CONFIG.successColor)
+            .setTitle("✅ Sanktion bezahlt")
+            .setDescription(
+              [
+                "━━━━━━━━━━━━━━━━━━━━",
+                `**Name:** <@${record.targetUserId}>`,
+                `**Bezahlt markiert von:** <@${interaction.user.id}>`,
+                `**Zeitpunkt:** <t:${unixTimestamp(record.paidAt)}:F>`,
+                `**Sanktion-ID:** \`${record.id}\``,
+                "━━━━━━━━━━━━━━━━━━━━",
+              ].join("\n")
+            )
+            .setFooter({ text: `${CONFIG.shortName} • Sanktionslog` }),
+        ],
       });
 
       return interaction.reply({
