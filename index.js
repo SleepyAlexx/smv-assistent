@@ -1,11 +1,11 @@
 // =====================================================
 // SMV-Assistent | Registrierungspanel
-// Sauberes Start-Script für index.js
+// Sauberes Script für index.js
 //
 // Funktionen:
 // ✅ Bot startet sauber über Railway
-// ✅ /registrierpanel erstellt ein schönes Registrierungs-Panel
-// ✅ User klickt auf Button "Registrieren"
+// ✅ /registrierpanel erstellt ein schönes Registrierungspanel
+// ✅ User klickt auf "Registrieren"
 // ✅ User gibt Vorname + Nachname ein
 // ✅ Bot setzt automatisch den Nickname: SMV I Vorname Nachname
 //
@@ -46,7 +46,7 @@ const CONFIG = {
   // SMV I Alex Kingsley
   nicknamePrefix: "SMV I",
 
-  // Discord Embed-Farbe
+  // Embed-Farbe
   embedColor: 0x2b2d31,
 
   // Optional:
@@ -78,8 +78,8 @@ function checkEnv() {
 // =====================================================
 
 // Wichtig:
-// Wir benutzen hier NUR Guilds.
-// Dadurch kommt KEIN Fehler wegen "Used disallowed intents".
+// Wir benutzen hier nur Guilds.
+// Dadurch gibt es keinen Fehler wegen "Used disallowed intents".
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -121,12 +121,6 @@ function createRegisterPanelEmbed() {
         "",
         "**📝 Registrierung**",
         "└ Drücke unten auf den Button und trage deinen **Vor- und Nachnamen** ein.",
-        "",
-        "**🏷️ Automatischer Nickname**",
-        `└ Dein Name wird automatisch zu **${CONFIG.nicknamePrefix} Vorname Nachname** geändert.`,
-        "",
-        "**✅ Beispiel**",
-        `└ **${CONFIG.nicknamePrefix} Alex Kingsley**`,
         "",
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
