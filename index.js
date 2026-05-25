@@ -14,6 +14,8 @@
 // ABER: Bot-Rolle muss über den Rollen stehen, die er vergeben soll.
 // ABER: Bot-Rolle muss über User-Rollen stehen, deren Nickname er ändern soll.
 //
+// FIX: Sanktionen aus derselben Kategorie werden jetzt gesammelt und nicht mehr ersetzt.
+//
 // Leader/Sanktionsrechte:
 // Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
 // 1451315550394515516
@@ -1331,7 +1333,14 @@ client.on("interactionCreate", async (interaction) => {
         draft.selectedByMenu[group] = [];
       }
 
-      draft.selectedByMenu[group] = interaction.values;
+      // Wichtig:
+      // Neue Auswahl wird zur alten Auswahl hinzugefügt.
+      // Dadurch verschwinden bereits ausgewählte Sanktionen aus derselben Kategorie nicht mehr.
+      const oldValues = draft.selectedByMenu[group] || [];
+      const newValues = interaction.values || [];
+
+      draft.selectedByMenu[group] = [...new Set([...oldValues, ...newValues])];
+
       sanctionDrafts.set(interaction.user.id, draft);
 
       return interaction.update({
