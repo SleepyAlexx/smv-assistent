@@ -1,5 +1,7 @@
 require("dotenv").config();
 
+console.log("🔍 DISCORD_TOKEN vorhanden:", !!process.env.DISCORD_TOKEN);
+
 const { Client, GatewayIntentBits } = require("discord.js");
 
 const client = new Client({
