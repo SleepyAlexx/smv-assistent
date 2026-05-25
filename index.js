@@ -32,6 +32,7 @@
 // FIX: Forum-Post wird jetzt mit deferReply erstellt, damit kein Formular-Timeout entsteht.
 // FIX: Falls das Forum Tags hat, wird automatisch der erste verfügbare Tag genutzt.
 // FIX: Discord.js ephemeral-Warnung behoben: nutzt jetzt MessageFlags.Ephemeral.
+// DEBUG v15: Wunsch/Vorschlag schreibt jetzt genaue Debug-Logs in Railway.
 //
 // Leader/Sanktionsrechte:
 // Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
@@ -1489,27 +1490,53 @@ function createSuggestionEmbed({ title, category, suggestion, reason, userId }) 
 }
 
 async function postSuggestionToForum(interaction) {
-  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  console.log("🧪 [VORSCHLAG] Modal wurde empfangen.");
+  console.log(`🧪 [VORSCHLAG] User: ${interaction.user.tag} (${interaction.user.id})`);
+  console.log(`🧪 [VORSCHLAG] Guild: ${interaction.guildId}`);
+  console.log(`🧪 [VORSCHLAG] Forum-ID: ${CONFIG.suggestionForumChannelId}`);
 
   try {
+    console.log("🧪 [VORSCHLAG] deferReply wird ausgeführt...");
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    console.log("✅ [VORSCHLAG] deferReply erfolgreich.");
+
     const title = interaction.fields.getTextInputValue("suggestion_title").trim();
     const category = interaction.fields.getTextInputValue("suggestion_category").trim();
     const suggestion = interaction.fields.getTextInputValue("suggestion_text").trim();
     const reason = interaction.fields.getTextInputValue("suggestion_reason").trim();
 
-    const forumChannel = await client.channels.fetch(CONFIG.suggestionForumChannelId).catch(() => null);
+    console.log(`🧪 [VORSCHLAG] Titel: ${title}`);
+    console.log(`🧪 [VORSCHLAG] Kategorie: ${category}`);
+    console.log("🧪 [VORSCHLAG] Forum wird gesucht...");
 
-    if (!forumChannel || !forumChannel.threads) {
+    const forumChannel = await client.channels.fetch(CONFIG.suggestionForumChannelId).catch((error) => {
+      console.error("❌ [VORSCHLAG] Forum fetch fehlgeschlagen:", error);
+      return null;
+    });
+
+    if (!forumChannel) {
+      console.error("❌ [VORSCHLAG] Forum-Channel wurde nicht gefunden.");
       return interaction.editReply({
-        content: "❌ Das Wünsche/Vorschläge-Forum wurde nicht gefunden oder ist kein Forum-Channel.",
+        content: "❌ Das Wünsche/Vorschläge-Forum wurde nicht gefunden. Prüfe die Forum-Channel-ID.",
+      });
+    }
+
+    console.log(`✅ [VORSCHLAG] Forum gefunden: ${forumChannel.name || "unbekannt"} | Type: ${forumChannel.type}`);
+    console.log(`🧪 [VORSCHLAG] availableTags: ${JSON.stringify(forumChannel.availableTags || [])}`);
+
+    if (!forumChannel.threads) {
+      console.error("❌ [VORSCHLAG] Channel hat keine threads-Funktion. Ist es wirklich ein Forum?");
+      return interaction.editReply({
+        content: "❌ Der angegebene Channel ist kein Forum-Channel oder unterstützt keine Forum-Posts.",
       });
     }
 
     const threadName = `💡 ${truncate(title, 80)}`;
 
-    // Manche Foren haben Pflicht-Tags oder vorgegebene Tags.
-    // Wenn Tags vorhanden sind, nutzt der Bot automatisch den ersten verfügbaren Tag.
     const firstAvailableTagId = forumChannel.availableTags?.[0]?.id || null;
+
+    console.log(`🧪 [VORSCHLAG] Thread-Name: ${threadName}`);
+    console.log(`🧪 [VORSCHLAG] Genutzter Tag: ${firstAvailableTagId || "kein Tag"}`);
 
     const threadData = {
       name: threadName,
@@ -1533,20 +1560,41 @@ async function postSuggestionToForum(interaction) {
       threadData.appliedTags = [firstAvailableTagId];
     }
 
+    console.log("🧪 [VORSCHLAG] Forum-Post wird erstellt...");
     const thread = await forumChannel.threads.create(threadData);
+    console.log(`✅ [VORSCHLAG] Forum-Post erstellt: ${thread.id}`);
 
     return interaction.editReply({
       content: `✅ Dein Wunsch/Vorschlag wurde im Forum erstellt: <#${thread.id}>`,
     });
   } catch (error) {
-    console.error("❌ Fehler beim Erstellen eines Forum-Vorschlags:", error);
+    console.error("❌ [VORSCHLAG] Fehler beim Erstellen eines Forum-Vorschlags:");
+    console.error(error);
 
-    return interaction.editReply({
-      content: "❌ Der Vorschlag konnte nicht erstellt werden. Prüfe bitte, ob der Bot im Forum **Beiträge erstellen**, **Threads erstellen**, **In Threads schreiben** und **Links einbetten** darf.",
-    });
+    if (error?.rawError) {
+      console.error("❌ [VORSCHLAG] rawError:", JSON.stringify(error.rawError, null, 2));
+    }
+
+    if (error?.code) {
+      console.error("❌ [VORSCHLAG] Discord/API Code:", error.code);
+    }
+
+    try {
+      if (interaction.deferred || interaction.replied) {
+        return interaction.editReply({
+          content: "❌ Der Vorschlag konnte nicht erstellt werden. Prüfe die Railway-Logs, dort steht jetzt die genaue Debug-Meldung.",
+        });
+      }
+
+      return interaction.reply({
+        content: "❌ Der Vorschlag konnte nicht erstellt werden. Prüfe die Railway-Logs, dort steht jetzt die genaue Debug-Meldung.",
+        flags: MessageFlags.Ephemeral,
+      });
+    } catch (replyError) {
+      console.error("❌ [VORSCHLAG] Konnte nicht mal die Fehlermeldung an Discord senden:", replyError);
+    }
   }
 }
-
 
 
 // =====================================================
@@ -2385,6 +2433,7 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (interaction.isModalSubmit() && interaction.customId === "suggestion_modal") {
+      console.log("🧪 [INTERACTION] suggestion_modal wurde im Handler erkannt.");
       return postSuggestionToForum(interaction);
     }
 
