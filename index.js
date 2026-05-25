@@ -27,6 +27,7 @@
 // UPDATE: Beim Bot-Start werden bestehende Mitglieder automatisch geprüft.
 // UPDATE: Wochenabgabe-System mit Button, Logs, Korrektur und Sonntagsübersicht eingebaut.
 // HINWEIS: Der automatische Zahlende/r-Start-Sync bleibt bewusst als Sicherheitsnetz drin.
+// UPDATE: Abmeldungs-Embed wurde schöner und übersichtlicher gestaltet.
 //
 // Leader/Sanktionsrechte:
 // Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
@@ -1312,24 +1313,40 @@ function createAbsenceModal() {
 
 function createAbsenceEmbed({ name, from, until, reason, userId }) {
   return new EmbedBuilder()
-    .setColor(CONFIG.embedColor)
+    .setColor(CONFIG.warningColor)
     .setTitle("📋 • ABMELDUNG")
     .setDescription(
       [
         "━━━━━━━━━━━━━━━━━━━━",
-        `**Name:** ${name}`,
-        `**Von:** ${from}`,
-        `**Bis:** ${until}`,
-        "",
-        "**Grund:**",
-        reason,
-        "",
-        `**Eingereicht von:** <@${userId}>`,
+        `**${name}** hat eine Abmeldung eingereicht.`,
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
     )
+    .addFields(
+      {
+        name: "👤 Name",
+        value: name,
+        inline: true,
+      },
+      {
+        name: "📅 Zeitraum",
+        value: `**Von:** ${from}\n**Bis:** ${until}`,
+        inline: true,
+      },
+      {
+        name: "📝 Grund",
+        value: reason,
+        inline: false,
+      },
+      {
+        name: "📨 Eingereicht von",
+        value: `<@${userId}>`,
+        inline: false,
+      }
+    )
+    .setTimestamp()
     .setFooter({
-      text: `${CONFIG.shortName} • Abmeldung • ${getGermanDateTime()}`,
+      text: `${CONFIG.shortName} • Abmeldung`,
     });
 }
 
