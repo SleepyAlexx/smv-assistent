@@ -18,7 +18,7 @@
 // UPDATE: Sanktionen können jetzt storniert/gelöscht werden.
 // UPDATE: Leader-Logs wurden schöner formatiert.
 // UPDATE: Überschrift ist jetzt 🚫 SANKTION 🚫.
-// UPDATE: Fußball-Events im Leaderpanel eingebaut.
+// UPDATE: Fußball-Events sind jetzt im Familienpanel eingebaut und aus dem Leaderpanel entfernt.
 // UPDATE: Aufstellungen und Fußball-Events markieren jetzt @everyone.
 // UPDATE: Fußball-Event-Formular wurde schöner benannt.
 // UPDATE: ❌-Buttons bei Aufstellung und Fußball sind jetzt grau statt rot.
@@ -33,6 +33,7 @@
 // FIX: Wochenabgabe-Logs zeigen immer einen lesbaren Usernamen statt nur <@ID>.
 // UPDATE: Wochenabgabe kann jetzt für 1 bis 6 Wochen im Voraus bestätigt werden.
 // UPDATE: Abmeldungs-Embed wurde schöner und übersichtlicher gestaltet.
+// UPDATE: Fußball-Event-Button im Familienpanel ist nur für die freigegebenen Rollen nutzbar.
 //
 // Leader/Sanktionsrechte:
 // Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
@@ -135,6 +136,12 @@ const CONFIG = {
   leaderRoleIds: [
     "1451315550394515516",
     "1434318021412786317",
+    "1451629804221894868",
+  ],
+
+  // Nur diese Rollen dürfen über das Familienpanel Fußball-Events erstellen
+  footballCreatorRoleIds: [
+    "1455643015820480582",
     "1451629804221894868",
   ],
 };
@@ -401,6 +408,11 @@ function truncate(text, max = 90) {
 function hasLeaderPermission(member) {
   if (!member || !member.roles || !member.roles.cache) return false;
   return CONFIG.leaderRoleIds.some((roleId) => member.roles.cache.has(roleId));
+}
+
+function hasFootballCreatorPermission(member) {
+  if (!member || !member.roles || !member.roles.cache) return false;
+  return CONFIG.footballCreatorRoleIds.some((roleId) => member.roles.cache.has(roleId));
 }
 
 function getMemberName(member, userId) {
@@ -819,9 +831,6 @@ function createLeaderPanelEmbed() {
         "**⚠️ Sanktionen**",
         "└ User auswählen, eine oder mehrere Sanktionen vergeben und automatisch berechnen lassen.",
         "",
-        "**⚽ Fußball-Event**",
-        "└ Spiel gegen eine andere Familie erstellen und Teilnehmer verwalten.",
-        "",
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
     )
@@ -836,13 +845,7 @@ function createLeaderPanelButtons() {
       .setCustomId("leader_create_sanction")
       .setLabel("Sanktion erstellen")
       .setEmoji("⚠️")
-      .setStyle(ButtonStyle.Danger),
-
-    new ButtonBuilder()
-      .setCustomId("leader_create_football")
-      .setLabel("Fußball-Event")
-      .setEmoji("⚽")
-      .setStyle(ButtonStyle.Primary)
+      .setStyle(ButtonStyle.Danger)
   );
 }
 
@@ -1263,7 +1266,10 @@ function createFamilyPanelEmbed() {
         "└ Melde dich für einen bestimmten Zeitraum ab.",
         "",
         "**💸 Wochenabgabe**",
-        "└ Bestätige deine Wochenabgabe für die aktuelle Woche.",
+        "└ Bestätige deine Wochenabgabe für 1 bis 6 Wochen.",
+        "",
+        "**⚽ Fußball-Event**",
+        "└ Spiel gegen eine andere Familie erstellen und Teilnehmer verwalten.",
         "",
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
@@ -1285,7 +1291,13 @@ function createFamilyPanelButtons() {
       .setCustomId("family_weekly_payment")
       .setLabel("Wochenabgabe bezahlt")
       .setEmoji("💸")
-      .setStyle(ButtonStyle.Success)
+      .setStyle(ButtonStyle.Success),
+
+    new ButtonBuilder()
+      .setCustomId("family_create_football")
+      .setLabel("Fußball-Event")
+      .setEmoji("⚽")
+      .setStyle(ButtonStyle.Primary)
   );
 }
 
@@ -2358,7 +2370,7 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     // -------------------------------
-    // Familienpanel / Abmeldung
+    // Familienpanel / Abmeldung / Fußball-Event
     // -------------------------------
 
     if (interaction.isButton() && interaction.customId === "family_absence") {
@@ -2367,6 +2379,17 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.isButton() && interaction.customId === "family_weekly_payment") {
       return handleWeeklyPayment(interaction);
+    }
+
+    if (interaction.isButton() && interaction.customId === "family_create_football") {
+      if (!hasFootballCreatorPermission(interaction.member)) {
+        return interaction.reply({
+          content: "❌ Du hast keine Berechtigung, Fußball-Events zu erstellen.",
+          ephemeral: true,
+        });
+      }
+
+      return interaction.showModal(createFootballEventModal());
     }
 
     if (interaction.isStringSelectMenu() && interaction.customId === "weekly_payment_select") {
@@ -2394,7 +2417,7 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (interaction.isModalSubmit() && interaction.customId === "football_event_modal") {
-      if (!hasLeaderPermission(interaction.member)) {
+      if (!hasFootballCreatorPermission(interaction.member)) {
         return interaction.reply({
           content: "❌ Du hast keine Berechtigung, Fußball-Events zu erstellen.",
           ephemeral: true,
@@ -2602,7 +2625,10 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (interaction.isButton() && interaction.customId === "leader_create_football") {
-      return interaction.showModal(createFootballEventModal());
+      return interaction.reply({
+        content: "ℹ️ Der Fußball-Event-Button wurde ins Familienpanel verschoben. Bitte nutze dort den Button **Fußball-Event**.",
+        ephemeral: true,
+      });
     }
 
     if (interaction.isUserSelectMenu() && interaction.customId === "sanction_user_select") {
