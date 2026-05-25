@@ -1,11 +1,19 @@
-// ===============================
+// =====================================================
 // SMV-Assistent | Registrierungspanel
-// Funktion:
-// - /registrierpanel sendet ein schönes Registrierungs-Panel
-// - User klickt auf "Registrieren"
-// - User gibt Vorname + Nachname ein
-// - Bot setzt automatisch den Nickname: SMV I Vorname Nachname
-// ===============================
+// Sauberes Start-Script für index.js
+//
+// Funktionen:
+// ✅ Bot startet sauber über Railway
+// ✅ /registrierpanel erstellt ein schönes Registrierungs-Panel
+// ✅ User klickt auf Button "Registrieren"
+// ✅ User gibt Vorname + Nachname ein
+// ✅ Bot setzt automatisch den Nickname: SMV I Vorname Nachname
+//
+// Wichtig:
+// - Bot braucht auf Discord die Berechtigung "Nicknamen verwalten"
+// - Die Rolle vom Bot muss über den Rollen der User stehen
+// - Der Server-Owner kann nicht umbenannt werden
+// =====================================================
 
 require("dotenv").config();
 
@@ -25,46 +33,81 @@ const {
   PermissionFlagsBits,
 } = require("discord.js");
 
-// ===============================
+// =====================================================
 // EINSTELLUNGEN
-// ===============================
+// =====================================================
 
 const CONFIG = {
   botName: "SMV-Assistent",
   familyName: "Sedoij Medved",
   shortName: "SMV",
+
+  // So wird der Nickname später aussehen:
+  // SMV I Alex Kingsley
   nicknamePrefix: "SMV I",
+
+  // Discord Embed-Farbe
   embedColor: 0x2b2d31,
 
   // Optional:
-  // Wenn REGISTRATION_CHANNEL_ID in Railway/.env eingetragen ist,
-  // sendet /registrierpanel das Panel automatisch in diesen Channel.
-  // Wenn nicht, wird es in den aktuellen Channel gesendet.
+  // Wenn du in Railway eine Variable REGISTRATION_CHANNEL_ID einträgst,
+  // wird das Panel immer in diesen Channel gesendet.
+  // Wenn du keine REGISTRATION_CHANNEL_ID einträgst,
+  // wird das Panel in den Channel gesendet, wo du /registrierpanel ausführst.
   registrationChannelId: process.env.REGISTRATION_CHANNEL_ID || null,
 };
 
-// ===============================
-// CLIENT
-// ===============================
+// =====================================================
+// ENV-CHECK
+// =====================================================
 
+function checkEnv() {
+  const requiredEnv = ["DISCORD_TOKEN", "CLIENT_ID", "GUILD_ID"];
+  const missingEnv = requiredEnv.filter((key) => !process.env[key]);
+
+  if (missingEnv.length > 0) {
+    console.error("❌ Fehlende Railway/.env Variablen:", missingEnv.join(", "));
+    process.exit(1);
+  }
+
+  console.log("✅ Alle wichtigen Variablen wurden gefunden.");
+}
+
+// =====================================================
+// CLIENT
+// =====================================================
+
+// Wichtig:
+// Wir benutzen hier NUR Guilds.
+// Dadurch kommt KEIN Fehler wegen "Used disallowed intents".
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
   ],
 });
 
-// ===============================
+// =====================================================
 // HILFSFUNKTIONEN
-// ===============================
+// =====================================================
 
 function cleanName(input) {
   return input
     .trim()
     .replace(/\s+/g, " ")
     .split(" ")
-    .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
     .join(" ");
+}
+
+function getGermanDateTime() {
+  return new Date().toLocaleString("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function createRegisterPanelEmbed() {
@@ -77,9 +120,9 @@ function createRegisterPanelEmbed() {
         `Willkommen bei der Familie **${CONFIG.familyName}**.`,
         "",
         "**📝 Registrierung**",
-        "└ Trage deinen **Vor- und Nachnamen** ein.",
+        "└ Drücke unten auf den Button und trage deinen **Vor- und Nachnamen** ein.",
         "",
-        "**🏷️ Nickname**",
+        "**🏷️ Automatischer Nickname**",
         `└ Dein Name wird automatisch zu **${CONFIG.nicknamePrefix} Vorname Nachname** geändert.`,
         "",
         "**✅ Beispiel**",
@@ -89,13 +132,7 @@ function createRegisterPanelEmbed() {
       ].join("\n")
     )
     .setFooter({
-      text: `${CONFIG.shortName} • Registrierung • ${new Date().toLocaleString("de-DE", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      })}`,
+      text: `${CONFIG.shortName} • Registrierung • ${getGermanDateTime()}`,
     });
 }
 
@@ -140,9 +177,9 @@ function createRegisterModal() {
   return modal;
 }
 
-// ===============================
-// SLASH COMMAND REGISTRIEREN
-// ===============================
+// =====================================================
+// SLASH COMMANDS REGISTRIEREN
+// =====================================================
 
 async function registerCommands() {
   const commands = [
@@ -160,12 +197,12 @@ async function registerCommands() {
     { body: commands }
   );
 
-  console.log("✅ Slash Commands wurden registriert.");
+  console.log("✅ Slash Command /registrierpanel wurde registriert.");
 }
 
-// ===============================
+// =====================================================
 // BOT START
-// ===============================
+// =====================================================
 
 client.once("clientReady", async () => {
   console.log(`✅ ${CONFIG.botName} ist online als ${client.user.tag}`);
@@ -177,9 +214,9 @@ client.once("clientReady", async () => {
   }
 });
 
-// ===============================
+// =====================================================
 // INTERACTIONS
-// ===============================
+// =====================================================
 
 client.on("interactionCreate", async (interaction) => {
   try {
@@ -220,6 +257,13 @@ client.on("interactionCreate", async (interaction) => {
       const firstName = cleanName(interaction.fields.getTextInputValue("first_name"));
       const lastName = cleanName(interaction.fields.getTextInputValue("last_name"));
 
+      if (!firstName || !lastName) {
+        return interaction.reply({
+          content: "❌ Bitte gib einen gültigen Vor- und Nachnamen ein.",
+          ephemeral: true,
+        });
+      }
+
       const newNickname = `${CONFIG.nicknamePrefix} ${firstName} ${lastName}`;
 
       if (newNickname.length > 32) {
@@ -249,19 +293,25 @@ client.on("interactionCreate", async (interaction) => {
     console.error("❌ Fehler bei einer Interaction:", error);
 
     const errorMessage =
-      "❌ Es ist ein Fehler passiert. Prüfe, ob der Bot die Berechtigung **Nicknamen verwalten** hat und seine Rolle über der User-Rolle steht.";
+      "❌ Es ist ein Fehler passiert. Prüfe bitte, ob der Bot **Nicknamen verwalten** darf und seine Rolle über der Rolle des Users steht.";
 
     if (interaction.replied || interaction.deferred) {
-      return interaction.followUp({ content: errorMessage, ephemeral: true }).catch(() => {});
+      return interaction.followUp({
+        content: errorMessage,
+        ephemeral: true,
+      }).catch(() => {});
     }
 
-    return interaction.reply({ content: errorMessage, ephemeral: true }).catch(() => {});
+    return interaction.reply({
+      content: errorMessage,
+      ephemeral: true,
+    }).catch(() => {});
   }
 });
 
-// ===============================
+// =====================================================
 // FEHLER ABFANGEN
-// ===============================
+// =====================================================
 
 process.on("unhandledRejection", (error) => {
   console.error("❌ Unhandled Rejection:", error);
@@ -271,8 +321,9 @@ process.on("uncaughtException", (error) => {
   console.error("❌ Uncaught Exception:", error);
 });
 
-// ===============================
+// =====================================================
 // LOGIN
-// ===============================
+// =====================================================
 
+checkEnv();
 client.login(process.env.DISCORD_TOKEN);
