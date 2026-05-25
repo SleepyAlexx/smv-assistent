@@ -21,6 +21,7 @@
 // UPDATE: Fußball-Events im Leaderpanel eingebaut.
 // UPDATE: Aufstellungen und Fußball-Events markieren jetzt @everyone.
 // UPDATE: Fußball-Event-Formular wurde schöner benannt.
+// UPDATE: ❌-Buttons bei Aufstellung und Fußball sind jetzt grau statt rot.
 //
 // Leader/Sanktionsrechte:
 // Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
@@ -538,7 +539,7 @@ function createLineupButtons(lineup) {
       .setCustomId(`lineup_absent_${lineup.dateKey}`)
       .setLabel(`${absentUsers.length}`)
       .setEmoji("❌")
-      .setStyle(ButtonStyle.Danger),
+      .setStyle(ButtonStyle.Secondary),
 
     new ButtonBuilder()
       .setCustomId(`lineup_unsure_${lineup.dateKey}`)
@@ -1221,7 +1222,7 @@ function createFootballEventButtons(event) {
       .setCustomId(`football_absent_${event.id}`)
       .setLabel(`${absentUsers.length}`)
       .setEmoji("❌")
-      .setStyle(ButtonStyle.Danger),
+      .setStyle(ButtonStyle.Secondary),
 
     new ButtonBuilder()
       .setCustomId(`football_unsure_${event.id}`)
