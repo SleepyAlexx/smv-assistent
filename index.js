@@ -1,6 +1,6 @@
 // =====================================================
 // SMV-Assistent | Komplettscript
-// Registrierung + Join/Leave + Aufstellung + Leaderpanel/Sanktionen + Fußball-Events
+// Registrierung + Join/Leave + Aufstellung + Leaderpanel/Sanktionen + Fußball-Events + @everyone
 //
 // Datei: index.js
 //
@@ -19,6 +19,8 @@
 // UPDATE: Leader-Logs wurden schöner formatiert.
 // UPDATE: Überschrift ist jetzt 🚫 SANKTION 🚫.
 // UPDATE: Fußball-Events im Leaderpanel eingebaut.
+// UPDATE: Aufstellungen und Fußball-Events markieren jetzt @everyone.
+// UPDATE: Fußball-Event-Formular wurde schöner benannt.
 //
 // Leader/Sanktionsrechte:
 // Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
@@ -585,8 +587,10 @@ async function createLineupForToday(reason = "scheduled") {
   const lineup = createEmptyLineup(now.dateKey, now.dateText, now.weekday);
 
   const message = await sendToChannel(CONFIG.lineupChannelId, {
+    content: "@everyone",
     embeds: [createLineupEmbed(lineup)],
     components: [createLineupButtons(lineup)],
+    allowedMentions: { parse: ["everyone"] },
   });
 
   if (!message) {
@@ -1068,11 +1072,11 @@ async function checkOverdueSanctions() {
 function createFootballEventModal() {
   const modal = new ModalBuilder()
     .setCustomId("football_event_modal")
-    .setTitle("Fußball-Event erstellen");
+    .setTitle("⚽ SMV Fußball-Event");
 
   const titleInput = new TextInputBuilder()
     .setCustomId("football_title")
-    .setLabel("Wer vs Wer?")
+    .setLabel("⚔️ Begegnung")
     .setPlaceholder("z. B. SMV vs. CDB")
     .setStyle(TextInputStyle.Short)
     .setMinLength(3)
@@ -1081,7 +1085,7 @@ function createFootballEventModal() {
 
   const dateInput = new TextInputBuilder()
     .setCustomId("football_date")
-    .setLabel("Datum")
+    .setLabel("📅 Datum")
     .setPlaceholder("z. B. 21.05.2026")
     .setStyle(TextInputStyle.Short)
     .setMinLength(8)
@@ -1090,7 +1094,7 @@ function createFootballEventModal() {
 
   const timeInput = new TextInputBuilder()
     .setCustomId("football_time")
-    .setLabel("Uhrzeit von/bis")
+    .setLabel("🕘 Uhrzeit")
     .setPlaceholder("z. B. 21:30 - 22:30")
     .setStyle(TextInputStyle.Short)
     .setMinLength(5)
@@ -1099,7 +1103,7 @@ function createFootballEventModal() {
 
   const sizeInput = new TextInputBuilder()
     .setCustomId("football_size")
-    .setLabel("Wie viele vs wie viele?")
+    .setLabel("👥 Spieleranzahl")
     .setPlaceholder("z. B. 15 vs 15")
     .setStyle(TextInputStyle.Short)
     .setMinLength(3)
@@ -1108,7 +1112,7 @@ function createFootballEventModal() {
 
   const locationInput = new TextInputBuilder()
     .setCustomId("football_location")
-    .setLabel("Standort")
+    .setLabel("📍 Standort")
     .setPlaceholder("z. B. Vespucci")
     .setStyle(TextInputStyle.Short)
     .setMinLength(2)
@@ -1265,8 +1269,10 @@ async function createAndPostFootballEvent(interaction) {
   });
 
   const message = await sendToChannel(CONFIG.footballEventChannelId, {
+    content: "@everyone",
     embeds: [createFootballEventEmbed(event)],
     components: [createFootballEventButtons(event)],
+    allowedMentions: { parse: ["everyone"] },
   });
 
   if (!message) {
