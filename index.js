@@ -26,6 +26,7 @@
 // UPDATE: Zahlende/r-Rolle wird automatisch verwaltet.
 // UPDATE: Beim Bot-Start werden bestehende Mitglieder automatisch geprüft.
 // UPDATE: Wochenabgabe-System mit Button, Logs, Korrektur und Sonntagsübersicht eingebaut.
+// HINWEIS: Der automatische Zahlende/r-Start-Sync bleibt bewusst als Sicherheitsnetz drin.
 //
 // Leader/Sanktionsrechte:
 // Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
