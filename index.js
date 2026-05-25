@@ -31,6 +31,7 @@
 // UPDATE: Button Wunsch/Vorschlag erstellt automatisch einen Forum-Post.
 // FIX: Forum-Post wird jetzt mit deferReply erstellt, damit kein Formular-Timeout entsteht.
 // FIX: Falls das Forum Tags hat, wird automatisch der erste verfügbare Tag genutzt.
+// FIX: Discord.js ephemeral-Warnung behoben: nutzt jetzt MessageFlags.Ephemeral.
 //
 // Leader/Sanktionsrechte:
 // Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
@@ -60,6 +61,7 @@ const {
   PermissionFlagsBits,
   UserSelectMenuBuilder,
   StringSelectMenuBuilder,
+  MessageFlags,
 } = require("discord.js");
 
 // =====================================================
@@ -1116,14 +1118,14 @@ async function createAndPostSanction(interaction, draft) {
   if (!draft.targetUserId) {
     return interaction.reply({
       content: "❌ Bitte wähle zuerst einen User aus.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
   if (selectedSanctions.length === 0) {
     return interaction.reply({
       content: "❌ Bitte wähle mindestens eine Sanktion aus.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -1142,7 +1144,7 @@ async function createAndPostSanction(interaction, draft) {
   if (!message) {
     return interaction.reply({
       content: "❌ Der Sanktionschannel wurde nicht gefunden.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -1177,7 +1179,7 @@ async function createAndPostSanction(interaction, draft) {
 
   return interaction.reply({
     content: `✅ Sanktion wurde erfolgreich in <#${CONFIG.sanctionChannelId}> erstellt.`,
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 }
 
@@ -1386,13 +1388,13 @@ async function postAbsence(interaction) {
   if (!message) {
     return interaction.reply({
       content: "❌ Der Abmeldungs-Channel wurde nicht gefunden.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
   return interaction.reply({
     content: `✅ Deine Abmeldung wurde erfolgreich in <#${CONFIG.absenceChannelId}> eingereicht.`,
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 }
 
@@ -1487,7 +1489,7 @@ function createSuggestionEmbed({ title, category, suggestion, reason, userId }) 
 }
 
 async function postSuggestionToForum(interaction) {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   try {
     const title = interaction.fields.getTextInputValue("suggestion_title").trim();
@@ -1637,7 +1639,7 @@ async function handleWeeklyPayment(interaction) {
   if (!latestMember.roles.cache.has(CONFIG.payerRoleId)) {
     return interaction.reply({
       content: "❌ Du hast aktuell nicht die Rolle **Zahlende/r** und musst deshalb keine Wochenabgabe bestätigen.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -1648,7 +1650,7 @@ async function handleWeeklyPayment(interaction) {
   if (weekData.paidUsers[interaction.user.id]) {
     return interaction.reply({
       content: `ℹ️ Du hast deine Wochenabgabe für **${weekKey}** bereits bestätigt.`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -1689,7 +1691,7 @@ async function handleWeeklyPayment(interaction) {
 
   return interaction.reply({
     content: `✅ Deine Wochenabgabe für **${weekKey}** wurde als bezahlt gespeichert.`,
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 }
 
@@ -1697,7 +1699,7 @@ async function removeWeeklyPayment(interaction, weekKey, userId) {
   if (!hasLeaderPermission(interaction.member)) {
     return interaction.reply({
       content: "❌ Du hast keine Berechtigung, Wochenabgaben zu korrigieren.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -1708,7 +1710,7 @@ async function removeWeeklyPayment(interaction, weekKey, userId) {
   if (!payment) {
     return interaction.reply({
       content: "ℹ️ Diese Zahlung ist bereits entfernt oder wurde nicht gefunden.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -1757,7 +1759,7 @@ async function removeWeeklyPayment(interaction, weekKey, userId) {
 
   return interaction.reply({
     content: `✅ Zahlung von <@${userId}> für **${weekKey}** wurde entfernt.`,
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 }
 
@@ -2089,7 +2091,7 @@ async function createAndPostFootballEvent(interaction) {
   if (!message) {
     return interaction.reply({
       content: "❌ Der Fußball-Event-Channel wurde nicht gefunden.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -2101,7 +2103,7 @@ async function createAndPostFootballEvent(interaction) {
 
   return interaction.reply({
     content: `✅ Fußball-Event wurde erfolgreich in <#${CONFIG.footballEventChannelId}> erstellt.`,
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 }
 
@@ -2282,14 +2284,14 @@ client.on("interactionCreate", async (interaction) => {
 
       return interaction.reply({
         content: `✅ Registrierungspanel wurde erfolgreich in <#${CONFIG.registrationChannelId}> gesendet.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
     if (interaction.isChatInputCommand() && interaction.commandName === "aufstellung-test") {
       await interaction.reply({
         content: "✅ Test wird ausgeführt. Ich prüfe, ob für heute eine Aufstellung erstellt werden soll.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
 
       await createLineupForToday("manual-test");
@@ -2300,7 +2302,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!hasLeaderPermission(interaction.member)) {
         return interaction.reply({
           content: "❌ Du hast keine Berechtigung für das Leaderpanel.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -2311,7 +2313,7 @@ client.on("interactionCreate", async (interaction) => {
 
       return interaction.reply({
         content: "✅ Leaderpanel wurde gesendet.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -2323,7 +2325,7 @@ client.on("interactionCreate", async (interaction) => {
 
       return interaction.reply({
         content: "✅ Familienpanel wurde gesendet.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -2331,20 +2333,20 @@ client.on("interactionCreate", async (interaction) => {
       if (!hasLeaderPermission(interaction.member)) {
         return interaction.reply({
           content: "❌ Du hast keine Berechtigung für diesen Befehl.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
       await interaction.reply({
         content: "⏳ Ich prüfe jetzt alle Mitglieder und vergebe/entferne die Zahlende/r-Rolle automatisch.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
 
       await syncAllPayerRoles(`Manueller Sync von ${interaction.user.tag}`);
 
       return interaction.followUp({
         content: "✅ Zahlende/r-Rollen wurden geprüft.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -2352,13 +2354,13 @@ client.on("interactionCreate", async (interaction) => {
       if (!hasLeaderPermission(interaction.member)) {
         return interaction.reply({
           content: "❌ Du hast keine Berechtigung für diesen Befehl.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
       await interaction.reply({
         content: "✅ Wochenabgabe-Übersicht wird erstellt.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
 
       await postWeeklyPaymentOverview(`Manuell von ${interaction.user.tag}`);
@@ -2410,7 +2412,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!hasLeaderPermission(interaction.member)) {
         return interaction.reply({
           content: "❌ Du hast keine Berechtigung, Fußball-Events zu erstellen.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -2424,7 +2426,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!firstName || !lastName) {
         return interaction.reply({
           content: "❌ Bitte gib einen gültigen Vor- und Nachnamen ein.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -2433,7 +2435,7 @@ client.on("interactionCreate", async (interaction) => {
       if (newNickname.length > 32) {
         return interaction.reply({
           content: "❌ Der Name ist leider zu lang. Discord erlaubt maximal 32 Zeichen beim Nickname.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -2442,7 +2444,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!member) {
         return interaction.reply({
           content: "❌ Dein Serverprofil konnte nicht gefunden werden.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -2462,7 +2464,7 @@ client.on("interactionCreate", async (interaction) => {
 
       return interaction.reply({
         content: replyMessage,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -2486,7 +2488,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!selectedStatus) {
         return interaction.reply({
           content: "❌ Ungültige Auswahl.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -2496,7 +2498,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!lineup) {
         return interaction.reply({
           content: "❌ Diese Aufstellung wurde nicht im Speicher gefunden. Bitte melde dich beim Team.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -2522,7 +2524,7 @@ client.on("interactionCreate", async (interaction) => {
 
       return interaction.reply({
         content: `✅ Deine Auswahl wurde gespeichert: **${statusText}**`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -2546,7 +2548,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!selectedStatus) {
         return interaction.reply({
           content: "❌ Ungültige Auswahl.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -2556,7 +2558,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!event) {
         return interaction.reply({
           content: "❌ Dieses Fußball-Event wurde nicht im Speicher gefunden. Bitte melde dich beim Team.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -2582,7 +2584,7 @@ client.on("interactionCreate", async (interaction) => {
 
       return interaction.reply({
         content: `✅ Deine Auswahl wurde gespeichert: **${statusText}**`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -2599,7 +2601,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!hasLeaderPermission(interaction.member)) {
         return interaction.reply({
           content: "❌ Du hast keine Berechtigung für diese Aktion.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
     }
@@ -2610,7 +2612,7 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.reply({
         content: createSanctionDraftText(interaction.user.id),
         components: createSanctionBuilderComponents(interaction.user.id),
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -2675,21 +2677,21 @@ client.on("interactionCreate", async (interaction) => {
       if (!record) {
         return interaction.reply({
           content: "❌ Diese Sanktion wurde nicht im Speicher gefunden.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
       if (record.paid) {
         return interaction.reply({
           content: "ℹ️ Diese Sanktion wurde bereits als bezahlt markiert und kann nicht mehr storniert werden.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
       if (record.cancelled) {
         return interaction.reply({
           content: "ℹ️ Diese Sanktion wurde bereits storniert.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -2723,7 +2725,7 @@ client.on("interactionCreate", async (interaction) => {
 
       return interaction.reply({
         content: "✅ Sanktion wurde storniert.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -2735,21 +2737,21 @@ client.on("interactionCreate", async (interaction) => {
       if (!record) {
         return interaction.reply({
           content: "❌ Diese Sanktion wurde nicht im Speicher gefunden.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
       if (record.paid) {
         return interaction.reply({
           content: "ℹ️ Diese Sanktion wurde bereits als bezahlt markiert.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
       if (record.cancelled) {
         return interaction.reply({
           content: "ℹ️ Diese Sanktion wurde bereits storniert.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -2783,7 +2785,7 @@ client.on("interactionCreate", async (interaction) => {
 
       return interaction.reply({
         content: "✅ Sanktion wurde als bezahlt markiert.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   } catch (error) {
@@ -2795,13 +2797,13 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.replied || interaction.deferred) {
       return interaction.followUp({
         content: errorMessage,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       }).catch(() => {});
     }
 
     return interaction.reply({
       content: errorMessage,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     }).catch(() => {});
   }
 });
