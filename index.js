@@ -1,6 +1,6 @@
 // =====================================================
 // SMV-Assistent | Komplettscript
-// Registrierung + Join/Leave + Aufstellung + Leaderpanel/Sanktionen
+// Registrierung + Join/Leave + Aufstellung + Leaderpanel/Sanktionen + Fußball-Events
 //
 // Datei: index.js
 //
@@ -18,6 +18,7 @@
 // UPDATE: Sanktionen können jetzt storniert/gelöscht werden.
 // UPDATE: Leader-Logs wurden schöner formatiert.
 // UPDATE: Überschrift ist jetzt 🚫 SANKTION 🚫.
+// UPDATE: Fußball-Events im Leaderpanel eingebaut.
 //
 // Leader/Sanktionsrechte:
 // Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
@@ -80,6 +81,9 @@ const CONFIG = {
   sanctionChannelId: "1434318024646856758",
   sanctionLogChannelId: "1508286380403589131",
   sanctionDueDays: 7,
+
+  // Fußball-Event-Channel
+  footballEventChannelId: "1451331983459356836",
 
   // Rollen, die nach Registrierung automatisch vergeben werden
   registeredRoleIds: [
@@ -165,6 +169,7 @@ function getDefaultData() {
     postedDates: {},
     lineups: {},
     sanctions: {},
+    footballEvents: {},
   };
 }
 
@@ -189,6 +194,7 @@ function loadData() {
       postedDates: data.postedDates || {},
       lineups: data.lineups || {},
       sanctions: data.sanctions || {},
+      footballEvents: data.footballEvents || {},
     };
   } catch (error) {
     console.error("❌ smv-data.json konnte nicht gelesen werden:", error);
@@ -629,6 +635,9 @@ function createLeaderPanelEmbed() {
         "**⚠️ Sanktionen**",
         "└ User auswählen, eine oder mehrere Sanktionen vergeben und automatisch berechnen lassen.",
         "",
+        "**⚽ Fußball-Event**",
+        "└ Spiel gegen eine andere Familie erstellen und Teilnehmer verwalten.",
+        "",
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
     )
@@ -643,7 +652,13 @@ function createLeaderPanelButtons() {
       .setCustomId("leader_create_sanction")
       .setLabel("Sanktion erstellen")
       .setEmoji("⚠️")
-      .setStyle(ButtonStyle.Danger)
+      .setStyle(ButtonStyle.Danger),
+
+    new ButtonBuilder()
+      .setCustomId("leader_create_football")
+      .setLabel("Fußball-Event")
+      .setEmoji("⚽")
+      .setStyle(ButtonStyle.Primary)
   );
 }
 
@@ -1045,6 +1060,235 @@ async function checkOverdueSanctions() {
   if (changed) saveData(data);
 }
 
+
+// =====================================================
+// FUẞBALL-EVENTS
+// =====================================================
+
+function createFootballEventModal() {
+  const modal = new ModalBuilder()
+    .setCustomId("football_event_modal")
+    .setTitle("Fußball-Event erstellen");
+
+  const titleInput = new TextInputBuilder()
+    .setCustomId("football_title")
+    .setLabel("Wer vs Wer?")
+    .setPlaceholder("z. B. SMV vs. CDB")
+    .setStyle(TextInputStyle.Short)
+    .setMinLength(3)
+    .setMaxLength(80)
+    .setRequired(true);
+
+  const dateInput = new TextInputBuilder()
+    .setCustomId("football_date")
+    .setLabel("Datum")
+    .setPlaceholder("z. B. 21.05.2026")
+    .setStyle(TextInputStyle.Short)
+    .setMinLength(8)
+    .setMaxLength(20)
+    .setRequired(true);
+
+  const timeInput = new TextInputBuilder()
+    .setCustomId("football_time")
+    .setLabel("Uhrzeit von/bis")
+    .setPlaceholder("z. B. 21:30 - 22:30")
+    .setStyle(TextInputStyle.Short)
+    .setMinLength(5)
+    .setMaxLength(30)
+    .setRequired(true);
+
+  const sizeInput = new TextInputBuilder()
+    .setCustomId("football_size")
+    .setLabel("Wie viele vs wie viele?")
+    .setPlaceholder("z. B. 15 vs 15")
+    .setStyle(TextInputStyle.Short)
+    .setMinLength(3)
+    .setMaxLength(30)
+    .setRequired(true);
+
+  const locationInput = new TextInputBuilder()
+    .setCustomId("football_location")
+    .setLabel("Standort")
+    .setPlaceholder("z. B. Vespucci")
+    .setStyle(TextInputStyle.Short)
+    .setMinLength(2)
+    .setMaxLength(80)
+    .setRequired(true);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(titleInput),
+    new ActionRowBuilder().addComponents(dateInput),
+    new ActionRowBuilder().addComponents(timeInput),
+    new ActionRowBuilder().addComponents(sizeInput),
+    new ActionRowBuilder().addComponents(locationInput)
+  );
+
+  return modal;
+}
+
+function createFootballEventRecord({ title, dateText, timeText, sizeText, locationText, leaderId }) {
+  return {
+    id: createShortId(),
+    title,
+    dateText,
+    timeText,
+    sizeText,
+    locationText,
+    leaderId,
+    createdAt: Date.now(),
+    messageId: null,
+    users: {},
+  };
+}
+
+function getFootballUsersByStatus(event, status) {
+  return Object.entries(event.users || {})
+    .filter(([, userData]) => userData.status === status)
+    .map(([userId, userData]) => ({
+      userId,
+      name: userData.name || `<@${userId}>`,
+    }));
+}
+
+function createFootballEventEmbed(event) {
+  const presentUsers = getFootballUsersByStatus(event, "present");
+  const absentUsers = getFootballUsersByStatus(event, "absent");
+  const unsureUsers = getFootballUsersByStatus(event, "unsure");
+  const total = presentUsers.length + absentUsers.length + unsureUsers.length;
+
+  return new EmbedBuilder()
+    .setColor(CONFIG.embedColor)
+    .setTitle(event.title)
+    .setDescription(
+      [
+        "**Event Info:**",
+        `📅 ${event.dateText}`,
+        `🕘 ${event.timeText}`,
+        "",
+        "**Description:**",
+        `⚽ ${event.sizeText}`,
+        `📍 Standort: ${event.locationText}`,
+      ].join("\n")
+    )
+    .addFields(
+      {
+        name: `✅ Anwesend (${presentUsers.length})`,
+        value: formatUserList(presentUsers, "✅"),
+        inline: true,
+      },
+      {
+        name: `❌ Abwesend (${absentUsers.length})`,
+        value: formatUserList(absentUsers, "❌"),
+        inline: true,
+      },
+      {
+        name: `⏳ Ungewiss (${unsureUsers.length})`,
+        value: formatUserList(unsureUsers, "⏳"),
+        inline: true,
+      },
+      {
+        name: "Info",
+        value: [
+          `Sign ups: Total: **${total}**`,
+          `Event start time: **${event.dateText} ${event.timeText.split("-")[0].trim()}**`,
+          `Erstellt von: <@${event.leaderId}>`,
+        ].join("\n"),
+        inline: false,
+      }
+    )
+    .setFooter({
+      text: `${CONFIG.shortName} • Fußball-Event • ${event.dateText}`,
+    });
+}
+
+function createFootballEventButtons(event) {
+  const presentUsers = getFootballUsersByStatus(event, "present");
+  const absentUsers = getFootballUsersByStatus(event, "absent");
+  const unsureUsers = getFootballUsersByStatus(event, "unsure");
+
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`football_present_${event.id}`)
+      .setLabel(`${presentUsers.length}`)
+      .setEmoji("✅")
+      .setStyle(ButtonStyle.Success),
+
+    new ButtonBuilder()
+      .setCustomId(`football_absent_${event.id}`)
+      .setLabel(`${absentUsers.length}`)
+      .setEmoji("❌")
+      .setStyle(ButtonStyle.Danger),
+
+    new ButtonBuilder()
+      .setCustomId(`football_unsure_${event.id}`)
+      .setLabel(`${unsureUsers.length}`)
+      .setEmoji("⏳")
+      .setStyle(ButtonStyle.Primary)
+  );
+}
+
+async function updateFootballEventMessage(event) {
+  if (!event.messageId) return;
+
+  const channel = await client.channels.fetch(CONFIG.footballEventChannelId).catch(() => null);
+  if (!channel) {
+    console.error("❌ Fußball-Event-Channel nicht gefunden.");
+    return;
+  }
+
+  const message = await channel.messages.fetch(event.messageId).catch(() => null);
+  if (!message) {
+    console.error("❌ Fußball-Event-Nachricht nicht gefunden.");
+    return;
+  }
+
+  await message.edit({
+    embeds: [createFootballEventEmbed(event)],
+    components: [createFootballEventButtons(event)],
+  });
+}
+
+async function createAndPostFootballEvent(interaction) {
+  const title = interaction.fields.getTextInputValue("football_title").trim();
+  const dateText = interaction.fields.getTextInputValue("football_date").trim();
+  const timeText = interaction.fields.getTextInputValue("football_time").trim();
+  const sizeText = interaction.fields.getTextInputValue("football_size").trim();
+  const locationText = interaction.fields.getTextInputValue("football_location").trim();
+
+  const event = createFootballEventRecord({
+    title,
+    dateText,
+    timeText,
+    sizeText,
+    locationText,
+    leaderId: interaction.user.id,
+  });
+
+  const message = await sendToChannel(CONFIG.footballEventChannelId, {
+    embeds: [createFootballEventEmbed(event)],
+    components: [createFootballEventButtons(event)],
+  });
+
+  if (!message) {
+    return interaction.reply({
+      content: "❌ Der Fußball-Event-Channel wurde nicht gefunden.",
+      ephemeral: true,
+    });
+  }
+
+  event.messageId = message.id;
+
+  const data = loadData();
+  data.footballEvents[event.id] = event;
+  saveData(data);
+
+  return interaction.reply({
+    content: `✅ Fußball-Event wurde erfolgreich in <#${CONFIG.footballEventChannelId}> erstellt.`,
+    ephemeral: true,
+  });
+}
+
+
 // =====================================================
 // SCHEDULER
 // =====================================================
@@ -1224,6 +1468,17 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.showModal(createRegisterModal());
     }
 
+    if (interaction.isModalSubmit() && interaction.customId === "football_event_modal") {
+      if (!hasLeaderPermission(interaction.member)) {
+        return interaction.reply({
+          content: "❌ Du hast keine Berechtigung, Fußball-Events zu erstellen.",
+          ephemeral: true,
+        });
+      }
+
+      return createAndPostFootballEvent(interaction);
+    }
+
     if (interaction.isModalSubmit() && interaction.customId === "smv_register_modal") {
       const firstName = cleanName(interaction.fields.getTextInputValue("first_name"));
       const lastName = cleanName(interaction.fields.getTextInputValue("last_name"));
@@ -1334,6 +1589,66 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     // -------------------------------
+    // Fußball-Event Buttons
+    // -------------------------------
+
+    if (interaction.isButton() && interaction.customId.startsWith("football_")) {
+      const parts = interaction.customId.split("_");
+      const action = parts[1];
+      const eventId = parts.slice(2).join("_");
+
+      const statusMap = {
+        present: "present",
+        absent: "absent",
+        unsure: "unsure",
+      };
+
+      const selectedStatus = statusMap[action];
+
+      if (!selectedStatus) {
+        return interaction.reply({
+          content: "❌ Ungültige Auswahl.",
+          ephemeral: true,
+        });
+      }
+
+      const data = loadData();
+      const event = data.footballEvents[eventId];
+
+      if (!event) {
+        return interaction.reply({
+          content: "❌ Dieses Fußball-Event wurde nicht im Speicher gefunden. Bitte melde dich beim Team.",
+          ephemeral: true,
+        });
+      }
+
+      const member = interaction.member;
+      const userId = interaction.user.id;
+
+      event.users[userId] = {
+        status: selectedStatus,
+        name: getMemberName(member, userId),
+        updatedAt: new Date().toISOString(),
+      };
+
+      data.footballEvents[eventId] = event;
+      saveData(data);
+
+      await updateFootballEventMessage(event);
+
+      const statusText = {
+        present: "Anwesend",
+        absent: "Abwesend",
+        unsure: "Ungewiss",
+      }[selectedStatus];
+
+      return interaction.reply({
+        content: `✅ Deine Auswahl wurde gespeichert: **${statusText}**`,
+        ephemeral: true,
+      });
+    }
+
+    // -------------------------------
     // Leaderpanel / Sanktionen
     // -------------------------------
 
@@ -1359,6 +1674,10 @@ client.on("interactionCreate", async (interaction) => {
         components: createSanctionBuilderComponents(interaction.user.id),
         ephemeral: true,
       });
+    }
+
+    if (interaction.isButton() && interaction.customId === "leader_create_football") {
+      return interaction.showModal(createFootballEventModal());
     }
 
     if (interaction.isUserSelectMenu() && interaction.customId === "sanction_user_select") {
