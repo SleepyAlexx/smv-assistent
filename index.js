@@ -1,6 +1,6 @@
 // =====================================================
 // SMV-Assistent | Komplettscript
-// Registrierung + Join/Leave + Aufstellung + Leaderpanel/Sanktionen + Fußball-Events + Familienpanel + Rollenautomatik
+// Registrierung + Join/Leave + Aufstellung + Leaderpanel/Sanktionen + Fußball-Events + Familienpanel + Wochenabgabe
 //
 // Datei: index.js
 //
@@ -24,6 +24,8 @@
 // UPDATE: ❌-Buttons bei Aufstellung und Fußball sind jetzt grau statt rot.
 // UPDATE: Familienpanel mit Abmeldung eingebaut.
 // UPDATE: Zahlende/r-Rolle wird automatisch verwaltet.
+// UPDATE: Beim Bot-Start werden bestehende Mitglieder automatisch geprüft.
+// UPDATE: Wochenabgabe-System mit Button, Logs, Korrektur und Sonntagsübersicht eingebaut.
 //
 // Leader/Sanktionsrechte:
 // Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
@@ -96,6 +98,9 @@ const CONFIG = {
   // Wochenabgabe / Zahlende/r Rollenautomatik
   familyMemberRoleId: "1451314176004984912",
   payerRoleId: "1508303859385372812",
+
+  // Wochenabgabe-Log und Übersicht
+  weeklyPaymentChannelId: "1508307008389124246",
 
   // Diese User bekommen keine Zahlende/r-Rolle
   payerExcludedUserIds: [
@@ -198,6 +203,8 @@ function getDefaultData() {
     lineups: {},
     sanctions: {},
     footballEvents: {},
+    weeklyPayments: {},
+    weeklySummaries: {},
   };
 }
 
@@ -223,6 +230,8 @@ function loadData() {
       lineups: data.lineups || {},
       sanctions: data.sanctions || {},
       footballEvents: data.footballEvents || {},
+      weeklyPayments: data.weeklyPayments || {},
+      weeklySummaries: data.weeklySummaries || {},
     };
   } catch (error) {
     console.error("❌ smv-data.json konnte nicht gelesen werden:", error);
@@ -325,6 +334,26 @@ function formatMoney(amount) {
   return `${Number(amount || 0).toLocaleString("de-DE")}$`;
 }
 
+function chunkText(text, maxLength = 1000) {
+  if (!text || text.length <= maxLength) return [text || "—"];
+
+  const lines = text.split("\n");
+  const chunks = [];
+  let current = "";
+
+  for (const line of lines) {
+    if ((current + "\n" + line).length > maxLength) {
+      chunks.push(current || "—");
+      current = line;
+    } else {
+      current = current ? `${current}\n${line}` : line;
+    }
+  }
+
+  if (current) chunks.push(current);
+  return chunks.length ? chunks : ["—"];
+}
+
 function unixTimestamp(ms) {
   return Math.floor(ms / 1000);
 }
@@ -378,6 +407,7 @@ function shouldHavePayerRole(member) {
 
   const userId = member.user.id;
 
+  if (member.user.bot) return false;
   if (isPayerExcludedUser(userId)) return false;
   if (!member.roles.cache.has(CONFIG.familyMemberRoleId)) return false;
   if (hasAnyRole(member, CONFIG.payerExemptRoleIds)) return false;
@@ -407,6 +437,41 @@ async function syncPayerRole(member, reason = "Rollenautomatik") {
   }
 }
 
+async function syncAllPayerRoles(reason = "Bot-Start - Zahlende/r Prüfung") {
+  try {
+    const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(() => null);
+
+    if (!guild) {
+      console.error("❌ Guild für Zahlende/r-Sync nicht gefunden.");
+      return;
+    }
+
+    const members = await guild.members.fetch();
+
+    let checked = 0;
+
+    for (const member of members.values()) {
+      if (member.user.bot) continue;
+
+      const hasFamilyRole = member.roles.cache.has(CONFIG.familyMemberRoleId);
+      const hasPayerRole = member.roles.cache.has(CONFIG.payerRoleId);
+      const isExcluded = isPayerExcludedUser(member.user.id);
+      const isExempt = hasAnyRole(member, CONFIG.payerExemptRoleIds);
+
+      // Nur relevante Mitglieder prüfen:
+      // - Familienmitglieder
+      // - oder User, die Zahlende/r bereits haben, damit sie ggf. entfernt wird
+      if (!hasFamilyRole && !hasPayerRole) continue;
+
+      checked++;
+      await syncPayerRole(member, reason);
+    }
+
+    console.log(`✅ Zahlende/r-Sync abgeschlossen. Geprüfte Mitglieder: ${checked}`);
+  } catch (error) {
+    console.error("❌ Fehler bei syncAllPayerRoles:", error);
+  }
+}
 
 // =====================================================
 // REGISTRIERUNG
@@ -416,15 +481,12 @@ async function addRegisteredRoles(member) {
   const addedRoles = [];
   const failedRoles = [];
 
-  for (const roleId of CONFIG.registeredRoleIds) {
-    try {
-      // Zahlende/r wird nur vergeben, wenn der User nicht ausgeschlossen/befreit ist.
-      if (roleId === CONFIG.payerRoleId) {
-        if (isPayerExcludedUser(member.user.id) || hasAnyRole(member, CONFIG.payerExemptRoleIds)) {
-          continue;
-        }
-      }
+  // Zahlende/r wird nicht direkt in der Schleife vergeben,
+  // sondern danach über syncPayerRole sauber geprüft.
+  const rolesToAdd = CONFIG.registeredRoleIds.filter((roleId) => roleId !== CONFIG.payerRoleId);
 
+  for (const roleId of rolesToAdd) {
+    try {
       const role = await member.guild.roles.fetch(roleId).catch(() => null);
 
       if (!role) {
@@ -441,7 +503,10 @@ async function addRegisteredRoles(member) {
     }
   }
 
-  await syncPayerRole(member, "SMV Registrierung - Zahlende/r Prüfung");
+  // Member frisch laden, damit Discords Rollen-Cache nach der Registrierung sicher aktuell ist.
+  const freshMember = await member.guild.members.fetch(member.id).catch(() => member);
+
+  await syncPayerRole(freshMember, "SMV Registrierung - Zahlende/r Prüfung");
 
   return { addedRoles, failedRoles };
 }
@@ -1167,7 +1232,7 @@ function createFamilyPanelEmbed() {
         "└ Melde dich für einen bestimmten Zeitraum ab.",
         "",
         "**💸 Wochenabgabe**",
-        "└ System ist vorbereitet. Die Zahlende/r-Rolle wird automatisch verwaltet.",
+        "└ Bestätige deine Wochenabgabe für die aktuelle Woche.",
         "",
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
@@ -1187,10 +1252,9 @@ function createFamilyPanelButtons() {
 
     new ButtonBuilder()
       .setCustomId("family_weekly_payment")
-      .setLabel("Wochenabgabe")
+      .setLabel("Wochenabgabe bezahlt")
       .setEmoji("💸")
       .setStyle(ButtonStyle.Success)
-      .setDisabled(true)
   );
 }
 
@@ -1297,6 +1361,336 @@ async function postAbsence(interaction) {
     content: `✅ Deine Abmeldung wurde erfolgreich in <#${CONFIG.absenceChannelId}> eingereicht.`,
     ephemeral: true,
   });
+}
+
+
+
+// =====================================================
+// WOCHENABGABE
+// =====================================================
+
+function getWeekKey(date = new Date()) {
+  // Stabile Kalenderwochen-Berechnung anhand deutscher Zeit.
+  const berlin = getBerlinParts(date);
+  const localDate = new Date(`${berlin.year}-${berlin.month}-${berlin.day}T12:00:00Z`);
+
+  // ISO-Woche: Montag = Wochenstart
+  const dayNum = localDate.getUTCDay() || 7;
+  localDate.setUTCDate(localDate.getUTCDate() + 4 - dayNum);
+
+  const yearStart = new Date(Date.UTC(localDate.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((localDate - yearStart) / 86400000) + 1) / 7);
+  const year = localDate.getUTCFullYear();
+
+  return `${year}-KW${String(weekNo).padStart(2, "0")}`;
+}
+
+function ensureWeeklyPaymentData(data, weekKey = getWeekKey()) {
+  if (!data.weeklyPayments) data.weeklyPayments = {};
+
+  if (!data.weeklyPayments[weekKey]) {
+    data.weeklyPayments[weekKey] = {
+      weekKey,
+      paidUsers: {},
+      createdAt: Date.now(),
+    };
+  }
+
+  return data.weeklyPayments[weekKey];
+}
+
+function createWeeklyPaymentLogButtons(weekKey, userId, removed = false) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`weekly_remove_${weekKey}_${userId}`)
+      .setLabel(removed ? "Entfernt" : "Zahlung entfernen")
+      .setEmoji("❌")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(Boolean(removed))
+  );
+}
+
+function createWeeklyPaymentLogEmbed({ userId, weekKey, paidAt, removed = false, removedBy = null, removedAt = null }) {
+  if (removed) {
+    return new EmbedBuilder()
+      .setColor(CONFIG.dangerColor)
+      .setTitle("❌ Wochenabgabe korrigiert")
+      .setDescription(
+        [
+          "━━━━━━━━━━━━━━━━━━━━",
+          `**Name:** <@${userId}>`,
+          `**Woche:** ${weekKey}`,
+          `**Status:** Zahlung wurde entfernt`,
+          `**Entfernt von:** <@${removedBy}>`,
+          `**Zeitpunkt:** <t:${unixTimestamp(removedAt)}:F>`,
+          "━━━━━━━━━━━━━━━━━━━━",
+        ].join("\n")
+      )
+      .setFooter({ text: `${CONFIG.shortName} • Wochenabgabe` });
+  }
+
+  return new EmbedBuilder()
+    .setColor(CONFIG.successColor)
+    .setTitle("💸 Wochenabgabe bezahlt")
+    .setDescription(
+      [
+        "━━━━━━━━━━━━━━━━━━━━",
+        `**Name:** <@${userId}>`,
+        `**Woche:** ${weekKey}`,
+        `**Zeitpunkt:** <t:${unixTimestamp(paidAt)}:F>`,
+        "━━━━━━━━━━━━━━━━━━━━",
+      ].join("\n")
+    )
+    .setFooter({ text: `${CONFIG.shortName} • Wochenabgabe` });
+}
+
+async function handleWeeklyPayment(interaction) {
+  const member = interaction.member;
+  const freshMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => member);
+
+  await syncPayerRole(freshMember, "Wochenabgabe Button - Zahlende/r Prüfung");
+
+  const latestMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => freshMember);
+
+  if (!latestMember.roles.cache.has(CONFIG.payerRoleId)) {
+    return interaction.reply({
+      content: "❌ Du hast aktuell nicht die Rolle **Zahlende/r** und musst deshalb keine Wochenabgabe bestätigen.",
+      ephemeral: true,
+    });
+  }
+
+  const weekKey = getWeekKey();
+  const data = loadData();
+  const weekData = ensureWeeklyPaymentData(data, weekKey);
+
+  if (weekData.paidUsers[interaction.user.id]) {
+    return interaction.reply({
+      content: `ℹ️ Du hast deine Wochenabgabe für **${weekKey}** bereits bestätigt.`,
+      ephemeral: true,
+    });
+  }
+
+  const paidAt = Date.now();
+
+  weekData.paidUsers[interaction.user.id] = {
+    userId: interaction.user.id,
+    paidAt,
+    logMessageId: null,
+  };
+
+  data.weeklyPayments[weekKey] = weekData;
+  saveData(data);
+
+  const logMessage = await sendToChannel(CONFIG.weeklyPaymentChannelId, {
+    embeds: [
+      createWeeklyPaymentLogEmbed({
+        userId: interaction.user.id,
+        weekKey,
+        paidAt,
+      }),
+    ],
+    components: [
+      createWeeklyPaymentLogButtons(weekKey, interaction.user.id),
+    ],
+  });
+
+  if (logMessage) {
+    const freshData = loadData();
+    const freshWeekData = ensureWeeklyPaymentData(freshData, weekKey);
+
+    if (freshWeekData.paidUsers[interaction.user.id]) {
+      freshWeekData.paidUsers[interaction.user.id].logMessageId = logMessage.id;
+      freshData.weeklyPayments[weekKey] = freshWeekData;
+      saveData(freshData);
+    }
+  }
+
+  return interaction.reply({
+    content: `✅ Deine Wochenabgabe für **${weekKey}** wurde als bezahlt gespeichert.`,
+    ephemeral: true,
+  });
+}
+
+async function removeWeeklyPayment(interaction, weekKey, userId) {
+  if (!hasLeaderPermission(interaction.member)) {
+    return interaction.reply({
+      content: "❌ Du hast keine Berechtigung, Wochenabgaben zu korrigieren.",
+      ephemeral: true,
+    });
+  }
+
+  const data = loadData();
+  const weekData = ensureWeeklyPaymentData(data, weekKey);
+  const payment = weekData.paidUsers[userId];
+
+  if (!payment) {
+    return interaction.reply({
+      content: "ℹ️ Diese Zahlung ist bereits entfernt oder wurde nicht gefunden.",
+      ephemeral: true,
+    });
+  }
+
+  const removedAt = Date.now();
+  const removedBy = interaction.user.id;
+
+  delete weekData.paidUsers[userId];
+  data.weeklyPayments[weekKey] = weekData;
+  saveData(data);
+
+  await interaction.message.edit({
+    embeds: [
+      createWeeklyPaymentLogEmbed({
+        userId,
+        weekKey,
+        paidAt: payment.paidAt,
+        removed: true,
+        removedBy,
+        removedAt,
+      }),
+    ],
+    components: [
+      createWeeklyPaymentLogButtons(weekKey, userId, true),
+    ],
+  }).catch(() => {});
+
+  await sendToChannel(CONFIG.weeklyPaymentChannelId, {
+    embeds: [
+      new EmbedBuilder()
+        .setColor(CONFIG.warningColor)
+        .setTitle("🛠️ Wochenabgabe angepasst")
+        .setDescription(
+          [
+            "━━━━━━━━━━━━━━━━━━━━",
+            `**Name:** <@${userId}>`,
+            `**Woche:** ${weekKey}`,
+            `**Aktion:** Zahlung wurde aus der Bezahlt-Liste entfernt`,
+            `**Geändert von:** <@${removedBy}>`,
+            `**Zeitpunkt:** <t:${unixTimestamp(removedAt)}:F>`,
+            "━━━━━━━━━━━━━━━━━━━━",
+          ].join("\n")
+        )
+        .setFooter({ text: `${CONFIG.shortName} • Wochenabgabe-Log` }),
+    ],
+  });
+
+  return interaction.reply({
+    content: `✅ Zahlung von <@${userId}> für **${weekKey}** wurde entfernt.`,
+    ephemeral: true,
+  });
+}
+
+async function getPayerMembers(guild) {
+  const members = await guild.members.fetch();
+
+  return [...members.values()]
+    .filter((member) => !member.user.bot)
+    .filter((member) => member.roles.cache.has(CONFIG.payerRoleId));
+}
+
+function formatMemberListForOverview(membersOrIds, paidUsers = null) {
+  if (!membersOrIds || membersOrIds.length === 0) return "—";
+
+  if (paidUsers) {
+    return membersOrIds
+      .map((member) => {
+        const paidAt = paidUsers[member.id]?.paidAt;
+        return `✅ ${member.displayName || member.user.username} (<@${member.id}>)${paidAt ? ` — <t:${unixTimestamp(paidAt)}:R>` : ""}`;
+      })
+      .join("\n");
+  }
+
+  return membersOrIds
+    .map((member) => `❌ ${member.displayName || member.user.username} (<@${member.id}>)`)
+    .join("\n");
+}
+
+async function postWeeklyPaymentOverview(reason = "scheduled") {
+  const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(() => null);
+
+  if (!guild) {
+    console.error("❌ Guild für Wochenabgabe-Übersicht nicht gefunden.");
+    return;
+  }
+
+  const weekKey = getWeekKey();
+  const data = loadData();
+  const weekData = ensureWeeklyPaymentData(data, weekKey);
+
+  const payers = await getPayerMembers(guild);
+  const paidIds = Object.keys(weekData.paidUsers || {});
+
+  const paidMembers = payers.filter((member) => paidIds.includes(member.id));
+  const unpaidMembers = payers.filter((member) => !paidIds.includes(member.id));
+
+  const overviewEmbed = new EmbedBuilder()
+    .setColor(CONFIG.embedColor)
+    .setTitle("💸 WOCHENABGABE ÜBERSICHT")
+    .setDescription(
+      [
+        "━━━━━━━━━━━━━━━━━━━━",
+        `**Woche:** ${weekKey}`,
+        `**Stand:** <t:${unixTimestamp(Date.now())}:F>`,
+        `**Grund:** ${reason}`,
+        "",
+        `✅ Bezahlt: **${paidMembers.length}**`,
+        `❌ Nicht bezahlt: **${unpaidMembers.length}**`,
+        `👥 Zahlungspflichtig: **${payers.length}**`,
+        "━━━━━━━━━━━━━━━━━━━━",
+      ].join("\n")
+    )
+    .setFooter({ text: `${CONFIG.shortName} • Wochenabgabe` });
+
+  const paidTextChunks = chunkText(formatMemberListForOverview(paidMembers, weekData.paidUsers), 1000);
+  const unpaidTextChunks = chunkText(formatMemberListForOverview(unpaidMembers), 1000);
+
+  paidTextChunks.forEach((chunk, index) => {
+    overviewEmbed.addFields({
+      name: index === 0 ? "✅ Bezahlt" : `✅ Bezahlt (${index + 1})`,
+      value: chunk,
+      inline: false,
+    });
+  });
+
+  unpaidTextChunks.forEach((chunk, index) => {
+    overviewEmbed.addFields({
+      name: index === 0 ? "❌ Nicht bezahlt" : `❌ Nicht bezahlt (${index + 1})`,
+      value: chunk,
+      inline: false,
+    });
+  });
+
+  await sendToChannel(CONFIG.weeklyPaymentChannelId, {
+    embeds: [overviewEmbed],
+  });
+
+  if (!data.weeklySummaries) data.weeklySummaries = {};
+
+  data.weeklySummaries[weekKey] = {
+    postedAt: Date.now(),
+    reason,
+    paidCount: paidMembers.length,
+    unpaidCount: unpaidMembers.length,
+  };
+
+  saveData(data);
+
+  console.log(`✅ Wochenabgabe-Übersicht für ${weekKey} wurde gepostet.`);
+}
+
+async function checkWeeklyPaymentSummary() {
+  const now = getBerlinParts();
+  const weekKey = getWeekKey();
+
+  // Sonntag ab 20:00 Uhr. Wenn Railway genau um 20:00 kurz offline ist,
+  // wird die Übersicht später am Sonntag automatisch nachgeholt.
+  if (now.weekday !== "Sonntag") return;
+  if (Number(now.hour) < 20) return;
+
+  const data = loadData();
+
+  if (data.weeklySummaries?.[weekKey]) return;
+
+  await postWeeklyPaymentOverview("Sonntag 20:00 Uhr");
 }
 
 
@@ -1544,6 +1938,10 @@ function startSchedulers() {
     console.error("❌ Fehler bei erster Sanktionsprüfung:", error);
   });
 
+  checkWeeklyPaymentSummary().catch((error) => {
+    console.error("❌ Fehler bei erster Wochenabgabe-Prüfung:", error);
+  });
+
   // Jede Minute prüfen.
   setInterval(() => {
     checkDailyLineup().catch((error) => {
@@ -1552,6 +1950,10 @@ function startSchedulers() {
 
     checkOverdueSanctions().catch((error) => {
       console.error("❌ Fehler bei Sanktionsprüfung:", error);
+    });
+
+    checkWeeklyPaymentSummary().catch((error) => {
+      console.error("❌ Fehler bei Wochenabgabe-Prüfung:", error);
     });
   }, 60 * 1000);
 
@@ -1587,6 +1989,18 @@ async function registerCommands() {
       .setDescription("Sendet das SMV Familienpanel")
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
       .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("zahlende-sync")
+      .setDescription("Prüft und vergibt/entfernt die Zahlende/r-Rolle bei allen Mitgliedern")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("wochenabgabe-uebersicht")
+      .setDescription("Postet manuell die aktuelle Wochenabgabe-Übersicht")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .toJSON(),
   ];
 
   const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
@@ -1611,6 +2025,8 @@ client.once("clientReady", async () => {
   } catch (error) {
     console.error("❌ Fehler beim Registrieren der Slash Commands:", error);
   }
+
+  await syncAllPayerRoles("Bot-Start - automatische Zahlende/r Prüfung");
 
   startSchedulers();
 });
@@ -1729,12 +2145,63 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
+    if (interaction.isChatInputCommand() && interaction.commandName === "zahlende-sync") {
+      if (!hasLeaderPermission(interaction.member)) {
+        return interaction.reply({
+          content: "❌ Du hast keine Berechtigung für diesen Befehl.",
+          ephemeral: true,
+        });
+      }
+
+      await interaction.reply({
+        content: "⏳ Ich prüfe jetzt alle Mitglieder und vergebe/entferne die Zahlende/r-Rolle automatisch.",
+        ephemeral: true,
+      });
+
+      await syncAllPayerRoles(`Manueller Sync von ${interaction.user.tag}`);
+
+      return interaction.followUp({
+        content: "✅ Zahlende/r-Rollen wurden geprüft.",
+        ephemeral: true,
+      });
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === "wochenabgabe-uebersicht") {
+      if (!hasLeaderPermission(interaction.member)) {
+        return interaction.reply({
+          content: "❌ Du hast keine Berechtigung für diesen Befehl.",
+          ephemeral: true,
+        });
+      }
+
+      await interaction.reply({
+        content: "✅ Wochenabgabe-Übersicht wird erstellt.",
+        ephemeral: true,
+      });
+
+      await postWeeklyPaymentOverview(`Manuell von ${interaction.user.tag}`);
+
+      return;
+    }
+
     // -------------------------------
     // Familienpanel / Abmeldung
     // -------------------------------
 
     if (interaction.isButton() && interaction.customId === "family_absence") {
       return interaction.showModal(createAbsenceModal());
+    }
+
+    if (interaction.isButton() && interaction.customId === "family_weekly_payment") {
+      return handleWeeklyPayment(interaction);
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith("weekly_remove_")) {
+      const parts = interaction.customId.split("_");
+      const weekKey = parts[2];
+      const userId = parts[3];
+
+      return removeWeeklyPayment(interaction, weekKey, userId);
     }
 
     if (interaction.isModalSubmit() && interaction.customId === "absence_modal") {
