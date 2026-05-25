@@ -8,7 +8,7 @@ const client = new Client({
   ],
 });
 
-client.once("ready", () => {
+client.once("clientReady", () => {
   console.log(`✅ SMV-Assistent ist online als ${client.user.tag}`);
 });
 
