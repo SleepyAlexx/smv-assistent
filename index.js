@@ -34,6 +34,7 @@
 // UPDATE: Wochenabgabe kann jetzt für 1 bis 6 Wochen im Voraus bestätigt werden.
 // UPDATE: Abmeldungs-Embed wurde schöner und übersichtlicher gestaltet.
 // UPDATE: Fußball-Event-Button im Familienpanel ist nur für die freigegebenen Rollen nutzbar.
+// UPDATE: Fußball-Event steht im Familienpanel jetzt vor der Wochenabgabe.
 //
 // Leader/Sanktionsrechte:
 // Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
@@ -1265,11 +1266,11 @@ function createFamilyPanelEmbed() {
         "**📋 Abmeldung**",
         "└ Melde dich für einen bestimmten Zeitraum ab.",
         "",
-        "**💸 Wochenabgabe**",
-        "└ Bestätige deine Wochenabgabe für 1 bis 6 Wochen.",
-        "",
         "**⚽ Fußball-Event**",
         "└ Spiel gegen eine andere Familie erstellen und Teilnehmer verwalten.",
+        "",
+        "**💸 Wochenabgabe**",
+        "└ Bestätige deine Wochenabgabe für 1 bis 6 Wochen.",
         "",
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
@@ -1288,16 +1289,16 @@ function createFamilyPanelButtons() {
       .setStyle(ButtonStyle.Primary),
 
     new ButtonBuilder()
-      .setCustomId("family_weekly_payment")
-      .setLabel("Wochenabgabe bezahlt")
-      .setEmoji("💸")
-      .setStyle(ButtonStyle.Success),
-
-    new ButtonBuilder()
       .setCustomId("family_create_football")
       .setLabel("Fußball-Event")
       .setEmoji("⚽")
-      .setStyle(ButtonStyle.Primary)
+      .setStyle(ButtonStyle.Primary),
+
+    new ButtonBuilder()
+      .setCustomId("family_weekly_payment")
+      .setLabel("Wochenabgabe bezahlt")
+      .setEmoji("💸")
+      .setStyle(ButtonStyle.Success)
   );
 }
 
