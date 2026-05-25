@@ -117,7 +117,7 @@ function createRegisterPanelEmbed() {
     .setDescription(
       [
         "━━━━━━━━━━━━━━━━━━━━",
-        `Willkommen bei der Familie **${CONFIG.familyName}**.`,
+        `Privet, willkommen bei der Familie **${CONFIG.familyName}**.`,
         "",
         "**📝 Registrierung**",
         "└ Drücke unten auf den Button und trage deinen **Vor- und Nachnamen** ein.",
