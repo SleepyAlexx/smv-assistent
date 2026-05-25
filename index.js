@@ -18,6 +18,7 @@
 // Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
 // 1451315550394515516
 // 1434318021412786317
+// 1451629804221894868
 // =====================================================
 
 require("dotenv").config();
@@ -85,6 +86,7 @@ const CONFIG = {
   leaderRoleIds: [
     "1451315550394515516",
     "1434318021412786317",
+    "1451629804221894868",
   ],
 };
 
