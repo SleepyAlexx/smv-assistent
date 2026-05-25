@@ -1,6 +1,6 @@
 // =====================================================
 // SMV-Assistent | Komplettscript
-// Registrierung + Join/Leave + Aufstellung + Leaderpanel/Sanktionen + Fußball-Events + @everyone
+// Registrierung + Join/Leave + Aufstellung + Leaderpanel/Sanktionen + Fußball-Events + Familienpanel + Rollenautomatik
 //
 // Datei: index.js
 //
@@ -22,6 +22,8 @@
 // UPDATE: Aufstellungen und Fußball-Events markieren jetzt @everyone.
 // UPDATE: Fußball-Event-Formular wurde schöner benannt.
 // UPDATE: ❌-Buttons bei Aufstellung und Fußball sind jetzt grau statt rot.
+// UPDATE: Familienpanel mit Abmeldung eingebaut.
+// UPDATE: Zahlende/r-Rolle wird automatisch verwaltet.
 //
 // Leader/Sanktionsrechte:
 // Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
@@ -88,10 +90,33 @@ const CONFIG = {
   // Fußball-Event-Channel
   footballEventChannelId: "1451331983459356836",
 
+  // Familienpanel / Abmeldung
+  absenceChannelId: "1434318024076296326",
+
+  // Wochenabgabe / Zahlende/r Rollenautomatik
+  familyMemberRoleId: "1451314176004984912",
+  payerRoleId: "1508303859385372812",
+
+  // Diese User bekommen keine Zahlende/r-Rolle
+  payerExcludedUserIds: [
+    "150268856105959424",
+    "526066059258626049",
+    "1418628359054688530",
+  ],
+
+  // Sobald ein User eine dieser Rollen hat, wird Zahlende/r entfernt
+  payerExemptRoleIds: [
+    "1434318021467439198",
+    "1434318021467439196",
+    "1451315550394515516",
+    "1434318021412786317",
+  ],
+
   // Rollen, die nach Registrierung automatisch vergeben werden
   registeredRoleIds: [
     "1451314176004984912",
     "1434318021412786308",
+    "1508303859385372812",
   ],
 
   // Nur diese Rollen dürfen Leaderpanel/Sanktionen nutzen
@@ -334,6 +359,55 @@ async function sendToChannel(channelId, payload) {
   return await channel.send(payload);
 }
 
+
+// =====================================================
+// ZAHLENDE/R ROLLEN-AUTOMATIK
+// =====================================================
+
+function isPayerExcludedUser(userId) {
+  return CONFIG.payerExcludedUserIds.includes(userId);
+}
+
+function hasAnyRole(member, roleIds) {
+  if (!member || !member.roles || !member.roles.cache) return false;
+  return roleIds.some((roleId) => member.roles.cache.has(roleId));
+}
+
+function shouldHavePayerRole(member) {
+  if (!member || !member.user) return false;
+
+  const userId = member.user.id;
+
+  if (isPayerExcludedUser(userId)) return false;
+  if (!member.roles.cache.has(CONFIG.familyMemberRoleId)) return false;
+  if (hasAnyRole(member, CONFIG.payerExemptRoleIds)) return false;
+
+  return true;
+}
+
+async function syncPayerRole(member, reason = "Rollenautomatik") {
+  try {
+    if (!member || member.user?.bot) return;
+
+    const shouldHave = shouldHavePayerRole(member);
+    const hasPayerRole = member.roles.cache.has(CONFIG.payerRoleId);
+
+    if (shouldHave && !hasPayerRole) {
+      await member.roles.add(CONFIG.payerRoleId, reason);
+      console.log(`✅ Zahlende/r-Rolle vergeben an ${member.user.tag}`);
+      return;
+    }
+
+    if (!shouldHave && hasPayerRole) {
+      await member.roles.remove(CONFIG.payerRoleId, reason);
+      console.log(`✅ Zahlende/r-Rolle entfernt bei ${member.user.tag}`);
+    }
+  } catch (error) {
+    console.error(`❌ Fehler bei Zahlende/r-Rollenautomatik für ${member?.user?.tag || "unbekannt"}:`, error);
+  }
+}
+
+
 // =====================================================
 // REGISTRIERUNG
 // =====================================================
@@ -344,6 +418,13 @@ async function addRegisteredRoles(member) {
 
   for (const roleId of CONFIG.registeredRoleIds) {
     try {
+      // Zahlende/r wird nur vergeben, wenn der User nicht ausgeschlossen/befreit ist.
+      if (roleId === CONFIG.payerRoleId) {
+        if (isPayerExcludedUser(member.user.id) || hasAnyRole(member, CONFIG.payerExemptRoleIds)) {
+          continue;
+        }
+      }
+
       const role = await member.guild.roles.fetch(roleId).catch(() => null);
 
       if (!role) {
@@ -359,6 +440,8 @@ async function addRegisteredRoles(member) {
       console.error(`❌ Rolle konnte nicht vergeben werden (${roleId}):`, error);
     }
   }
+
+  await syncPayerRole(member, "SMV Registrierung - Zahlende/r Prüfung");
 
   return { addedRoles, failedRoles };
 }
@@ -1066,6 +1149,157 @@ async function checkOverdueSanctions() {
 }
 
 
+
+// =====================================================
+// FAMILIENPANEL / ABMELDUNG
+// =====================================================
+
+function createFamilyPanelEmbed() {
+  return new EmbedBuilder()
+    .setColor(CONFIG.embedColor)
+    .setTitle("🐻 • FAMILIENPANEL")
+    .setDescription(
+      [
+        "━━━━━━━━━━━━━━━━━━━━",
+        `Willkommen im Familienbereich der Familie **${CONFIG.familyName}**.`,
+        "",
+        "**📋 Abmeldung**",
+        "└ Melde dich für einen bestimmten Zeitraum ab.",
+        "",
+        "**💸 Wochenabgabe**",
+        "└ System ist vorbereitet. Die Zahlende/r-Rolle wird automatisch verwaltet.",
+        "",
+        "━━━━━━━━━━━━━━━━━━━━",
+      ].join("\n")
+    )
+    .setFooter({
+      text: `${CONFIG.shortName} • Familienverwaltung • ${getGermanDateTime()}`,
+    });
+}
+
+function createFamilyPanelButtons() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("family_absence")
+      .setLabel("Abmeldung")
+      .setEmoji("📋")
+      .setStyle(ButtonStyle.Primary),
+
+    new ButtonBuilder()
+      .setCustomId("family_weekly_payment")
+      .setLabel("Wochenabgabe")
+      .setEmoji("💸")
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(true)
+  );
+}
+
+function createAbsenceModal() {
+  const modal = new ModalBuilder()
+    .setCustomId("absence_modal")
+    .setTitle("📋 Abmeldung erstellen");
+
+  const nameInput = new TextInputBuilder()
+    .setCustomId("absence_name")
+    .setLabel("Name")
+    .setPlaceholder("z. B. SMV I Alex Kingsley")
+    .setStyle(TextInputStyle.Short)
+    .setMinLength(2)
+    .setMaxLength(60)
+    .setRequired(true);
+
+  const fromInput = new TextInputBuilder()
+    .setCustomId("absence_from")
+    .setLabel("Von")
+    .setPlaceholder("TT.MM.JJJJ")
+    .setStyle(TextInputStyle.Short)
+    .setMinLength(8)
+    .setMaxLength(20)
+    .setRequired(true);
+
+  const untilInput = new TextInputBuilder()
+    .setCustomId("absence_until")
+    .setLabel("Bis")
+    .setPlaceholder("TT.MM.JJJJ")
+    .setStyle(TextInputStyle.Short)
+    .setMinLength(8)
+    .setMaxLength(20)
+    .setRequired(true);
+
+  const reasonInput = new TextInputBuilder()
+    .setCustomId("absence_reason")
+    .setLabel("Grund")
+    .setPlaceholder("z. B. Privat, Arbeit, Urlaub, Krankheit ...")
+    .setStyle(TextInputStyle.Paragraph)
+    .setMinLength(2)
+    .setMaxLength(800)
+    .setRequired(true);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(nameInput),
+    new ActionRowBuilder().addComponents(fromInput),
+    new ActionRowBuilder().addComponents(untilInput),
+    new ActionRowBuilder().addComponents(reasonInput)
+  );
+
+  return modal;
+}
+
+function createAbsenceEmbed({ name, from, until, reason, userId }) {
+  return new EmbedBuilder()
+    .setColor(CONFIG.embedColor)
+    .setTitle("📋 • ABMELDUNG")
+    .setDescription(
+      [
+        "━━━━━━━━━━━━━━━━━━━━",
+        `**Name:** ${name}`,
+        `**Von:** ${from}`,
+        `**Bis:** ${until}`,
+        "",
+        "**Grund:**",
+        reason,
+        "",
+        `**Eingereicht von:** <@${userId}>`,
+        "━━━━━━━━━━━━━━━━━━━━",
+      ].join("\n")
+    )
+    .setFooter({
+      text: `${CONFIG.shortName} • Abmeldung • ${getGermanDateTime()}`,
+    });
+}
+
+async function postAbsence(interaction) {
+  const name = interaction.fields.getTextInputValue("absence_name").trim();
+  const from = interaction.fields.getTextInputValue("absence_from").trim();
+  const until = interaction.fields.getTextInputValue("absence_until").trim();
+  const reason = interaction.fields.getTextInputValue("absence_reason").trim();
+
+  const message = await sendToChannel(CONFIG.absenceChannelId, {
+    embeds: [
+      createAbsenceEmbed({
+        name,
+        from,
+        until,
+        reason,
+        userId: interaction.user.id,
+      }),
+    ],
+  });
+
+  if (!message) {
+    return interaction.reply({
+      content: "❌ Der Abmeldungs-Channel wurde nicht gefunden.",
+      ephemeral: true,
+    });
+  }
+
+  return interaction.reply({
+    content: `✅ Deine Abmeldung wurde erfolgreich in <#${CONFIG.absenceChannelId}> eingereicht.`,
+    ephemeral: true,
+  });
+}
+
+
 // =====================================================
 // FUẞBALL-EVENTS
 // =====================================================
@@ -1347,6 +1581,12 @@ async function registerCommands() {
       .setDescription("Sendet das SMV Leaderpanel")
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
       .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("familienpanel")
+      .setDescription("Sendet das SMV Familienpanel")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .toJSON(),
   ];
 
   const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
@@ -1393,6 +1633,8 @@ client.on("guildMemberAdd", async (member) => {
       content: message,
     });
 
+    await syncPayerRole(member, "Beitritt - Zahlende/r Prüfung");
+
     console.log(`✅ Willkommensnachricht gesendet für ${member.user.tag}`);
   } catch (error) {
     console.error("❌ Fehler bei guildMemberAdd:", error);
@@ -1410,6 +1652,14 @@ client.on("guildMemberRemove", async (member) => {
     console.log(`✅ Leave-Nachricht gesendet für ${member.user.tag}`);
   } catch (error) {
     console.error("❌ Fehler bei guildMemberRemove:", error);
+  }
+});
+
+client.on("guildMemberUpdate", async (oldMember, newMember) => {
+  try {
+    await syncPayerRole(newMember, "Rollenänderung - Zahlende/r Prüfung");
+  } catch (error) {
+    console.error("❌ Fehler bei guildMemberUpdate:", error);
   }
 });
 
@@ -1465,6 +1715,30 @@ client.on("interactionCreate", async (interaction) => {
         content: "✅ Leaderpanel wurde gesendet.",
         ephemeral: true,
       });
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === "familienpanel") {
+      await interaction.channel.send({
+        embeds: [createFamilyPanelEmbed()],
+        components: [createFamilyPanelButtons()],
+      });
+
+      return interaction.reply({
+        content: "✅ Familienpanel wurde gesendet.",
+        ephemeral: true,
+      });
+    }
+
+    // -------------------------------
+    // Familienpanel / Abmeldung
+    // -------------------------------
+
+    if (interaction.isButton() && interaction.customId === "family_absence") {
+      return interaction.showModal(createAbsenceModal());
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === "absence_modal") {
+      return postAbsence(interaction);
     }
 
     // -------------------------------
