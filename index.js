@@ -28,6 +28,9 @@
 // UPDATE: Wochenabgabe-System mit Button, Logs, Korrektur und Sonntagsübersicht eingebaut.
 // HINWEIS: Der automatische Zahlende/r-Start-Sync bleibt bewusst als Sicherheitsnetz drin.
 // UPDATE: Wunsch/Vorschlag-Button wurde entfernt.
+// UPDATE: Wochenabgabe-Logs zeigen jetzt den Discord-Namen und deutsche Zeitangaben.
+// UPDATE: Sonntagsübersicht zeigt ebenfalls Namen und deutsche Zeitangaben.
+// FIX: Wochenabgabe-Logs zeigen immer einen lesbaren Usernamen statt nur <@ID>.
 // UPDATE: Abmeldungs-Embed wurde schöner und übersichtlicher gestaltet.
 //
 // Leader/Sanktionsrechte:
@@ -297,6 +300,30 @@ function getGermanDateTime() {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+function formatGermanDateTimeFromMs(ms) {
+  return new Date(ms).toLocaleString("de-DE", {
+    timeZone: CONFIG.timezone,
+    weekday: "long",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function getReadableUserName(member, user) {
+  if (member?.displayName && !member.displayName.startsWith("<@")) {
+    return member.displayName;
+  }
+
+  if (user?.globalName) return user.globalName;
+  if (user?.username) return user.username;
+  if (user?.tag) return user.tag;
+
+  return "Unbekannter User";
 }
 
 function getBerlinParts(date = new Date()) {
@@ -1429,7 +1456,9 @@ function createWeeklyPaymentLogButtons(weekKey, userId, removed = false) {
   );
 }
 
-function createWeeklyPaymentLogEmbed({ userId, weekKey, paidAt, removed = false, removedBy = null, removedAt = null }) {
+function createWeeklyPaymentLogEmbed({ userId, userName, weekKey, paidAt, removed = false, removedBy = null, removedByName = null, removedAt = null }) {
+  const displayName = userName || "Unbekannter User";
+
   if (removed) {
     return new EmbedBuilder()
       .setColor(CONFIG.dangerColor)
@@ -1437,11 +1466,12 @@ function createWeeklyPaymentLogEmbed({ userId, weekKey, paidAt, removed = false,
       .setDescription(
         [
           "━━━━━━━━━━━━━━━━━━━━",
-          `**Name:** <@${userId}>`,
+          `**Name:** ${displayName}`,
+          `**Discord:** <@${userId}>`,
           `**Woche:** ${weekKey}`,
           `**Status:** Zahlung wurde entfernt`,
-          `**Entfernt von:** <@${removedBy}>`,
-          `**Zeitpunkt:** <t:${unixTimestamp(removedAt)}:F>`,
+          `**Entfernt von:** ${removedByName || "Unbekannter User"} (<@${removedBy}>)`,
+          `**Zeitpunkt:** ${formatGermanDateTimeFromMs(removedAt)}`,
           "━━━━━━━━━━━━━━━━━━━━",
         ].join("\n")
       )
@@ -1454,9 +1484,10 @@ function createWeeklyPaymentLogEmbed({ userId, weekKey, paidAt, removed = false,
     .setDescription(
       [
         "━━━━━━━━━━━━━━━━━━━━",
-        `**Name:** <@${userId}>`,
+        `**Name:** ${displayName}`,
+        `**Discord:** <@${userId}>`,
         `**Woche:** ${weekKey}`,
-        `**Zeitpunkt:** <t:${unixTimestamp(paidAt)}:F>`,
+        `**Zeitpunkt:** ${formatGermanDateTimeFromMs(paidAt)}`,
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
     )
@@ -1481,6 +1512,7 @@ async function handleWeeklyPayment(interaction) {
   const weekKey = getWeekKey();
   const data = loadData();
   const weekData = ensureWeeklyPaymentData(data, weekKey);
+  const userName = getReadableUserName(latestMember, interaction.user);
 
   if (weekData.paidUsers[interaction.user.id]) {
     return interaction.reply({
@@ -1493,6 +1525,7 @@ async function handleWeeklyPayment(interaction) {
 
   weekData.paidUsers[interaction.user.id] = {
     userId: interaction.user.id,
+    userName,
     paidAt,
     logMessageId: null,
   };
@@ -1504,6 +1537,7 @@ async function handleWeeklyPayment(interaction) {
     embeds: [
       createWeeklyPaymentLogEmbed({
         userId: interaction.user.id,
+        userName,
         weekKey,
         paidAt,
       }),
@@ -1551,6 +1585,7 @@ async function removeWeeklyPayment(interaction, weekKey, userId) {
 
   const removedAt = Date.now();
   const removedBy = interaction.user.id;
+  const removedByName = getReadableUserName(interaction.member, interaction.user);
 
   delete weekData.paidUsers[userId];
   data.weeklyPayments[weekKey] = weekData;
@@ -1560,10 +1595,12 @@ async function removeWeeklyPayment(interaction, weekKey, userId) {
     embeds: [
       createWeeklyPaymentLogEmbed({
         userId,
+        userName: payment.userName,
         weekKey,
         paidAt: payment.paidAt,
         removed: true,
         removedBy,
+        removedByName,
         removedAt,
       }),
     ],
@@ -1580,11 +1617,12 @@ async function removeWeeklyPayment(interaction, weekKey, userId) {
         .setDescription(
           [
             "━━━━━━━━━━━━━━━━━━━━",
-            `**Name:** <@${userId}>`,
+            `**Name:** ${payment.userName || `<@${userId}>`}`,
+            `**Discord:** <@${userId}>`,
             `**Woche:** ${weekKey}`,
             `**Aktion:** Zahlung wurde aus der Bezahlt-Liste entfernt`,
-            `**Geändert von:** <@${removedBy}>`,
-            `**Zeitpunkt:** <t:${unixTimestamp(removedAt)}:F>`,
+            `**Geändert von:** ${removedByName} (<@${removedBy}>)`,
+            `**Zeitpunkt:** ${formatGermanDateTimeFromMs(removedAt)}`,
             "━━━━━━━━━━━━━━━━━━━━",
           ].join("\n")
         )
@@ -1613,7 +1651,7 @@ function formatMemberListForOverview(membersOrIds, paidUsers = null) {
     return membersOrIds
       .map((member) => {
         const paidAt = paidUsers[member.id]?.paidAt;
-        return `✅ ${member.displayName || member.user.username} (<@${member.id}>)${paidAt ? ` — <t:${unixTimestamp(paidAt)}:R>` : ""}`;
+        return `✅ ${member.displayName || member.user.username} (<@${member.id}>)${paidAt ? ` — ${formatGermanDateTimeFromMs(paidAt)}` : ""}`;
       })
       .join("\n");
   }
@@ -1648,7 +1686,7 @@ async function postWeeklyPaymentOverview(reason = "scheduled") {
       [
         "━━━━━━━━━━━━━━━━━━━━",
         `**Woche:** ${weekKey}`,
-        `**Stand:** <t:${unixTimestamp(Date.now())}:F>`,
+        `**Stand:** ${formatGermanDateTimeFromMs(Date.now())}`,
         `**Grund:** ${reason}`,
         "",
         `✅ Bezahlt: **${paidMembers.length}**`,
