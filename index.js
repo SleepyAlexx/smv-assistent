@@ -1,6 +1,6 @@
 // =====================================================
 // SMV-Assistent | Komplettscript
-// Registrierung + Join/Leave + Aufstellung + Leaderpanel/Sanktionen + Fußball-Events + Familienpanel + Wochenabgabe + Forum-Vorschläge
+// Registrierung + Join/Leave + Aufstellung + Leaderpanel/Sanktionen + Fußball-Events + Familienpanel + Wochenabgabe
 //
 // Datei: index.js
 //
@@ -27,12 +27,8 @@
 // UPDATE: Beim Bot-Start werden bestehende Mitglieder automatisch geprüft.
 // UPDATE: Wochenabgabe-System mit Button, Logs, Korrektur und Sonntagsübersicht eingebaut.
 // HINWEIS: Der automatische Zahlende/r-Start-Sync bleibt bewusst als Sicherheitsnetz drin.
+// UPDATE: Wunsch/Vorschlag-Button wurde entfernt.
 // UPDATE: Abmeldungs-Embed wurde schöner und übersichtlicher gestaltet.
-// UPDATE: Button Wunsch/Vorschlag erstellt automatisch einen Forum-Post.
-// FIX: Forum-Post wird jetzt mit deferReply erstellt, damit kein Formular-Timeout entsteht.
-// FIX: Falls das Forum Tags hat, wird automatisch der erste verfügbare Tag genutzt.
-// FIX: Discord.js ephemeral-Warnung behoben: nutzt jetzt MessageFlags.Ephemeral.
-// DEBUG v16: Start-Marker + jede Interaction wird in Railway geloggt.
 //
 // Leader/Sanktionsrechte:
 // Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
@@ -62,7 +58,6 @@ const {
   PermissionFlagsBits,
   UserSelectMenuBuilder,
   StringSelectMenuBuilder,
-  MessageFlags,
 } = require("discord.js");
 
 // =====================================================
@@ -102,9 +97,6 @@ const CONFIG = {
 
   // Familienpanel / Abmeldung
   absenceChannelId: "1434318024076296326",
-
-  // Forum für Wünsche/Vorschläge
-  suggestionForumChannelId: "1508312625350443139",
 
   // Wochenabgabe / Zahlende/r Rollenautomatik
   familyMemberRoleId: "1451314176004984912",
@@ -1119,14 +1111,14 @@ async function createAndPostSanction(interaction, draft) {
   if (!draft.targetUserId) {
     return interaction.reply({
       content: "❌ Bitte wähle zuerst einen User aus.",
-      flags: MessageFlags.Ephemeral,
+      ephemeral: true,
     });
   }
 
   if (selectedSanctions.length === 0) {
     return interaction.reply({
       content: "❌ Bitte wähle mindestens eine Sanktion aus.",
-      flags: MessageFlags.Ephemeral,
+      ephemeral: true,
     });
   }
 
@@ -1145,7 +1137,7 @@ async function createAndPostSanction(interaction, draft) {
   if (!message) {
     return interaction.reply({
       content: "❌ Der Sanktionschannel wurde nicht gefunden.",
-      flags: MessageFlags.Ephemeral,
+      ephemeral: true,
     });
   }
 
@@ -1180,7 +1172,7 @@ async function createAndPostSanction(interaction, draft) {
 
   return interaction.reply({
     content: `✅ Sanktion wurde erfolgreich in <#${CONFIG.sanctionChannelId}> erstellt.`,
-    flags: MessageFlags.Ephemeral,
+    ephemeral: true,
   });
 }
 
@@ -1245,9 +1237,6 @@ function createFamilyPanelEmbed() {
         "**💸 Wochenabgabe**",
         "└ Bestätige deine Wochenabgabe für die aktuelle Woche.",
         "",
-        "**💡 Wunsch/Vorschlag**",
-        "└ Reiche einen Wunsch oder Vorschlag direkt im Forum ein.",
-        "",
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
     )
@@ -1268,13 +1257,7 @@ function createFamilyPanelButtons() {
       .setCustomId("family_weekly_payment")
       .setLabel("Wochenabgabe bezahlt")
       .setEmoji("💸")
-      .setStyle(ButtonStyle.Success),
-
-    new ButtonBuilder()
-      .setCustomId("family_suggestion")
-      .setLabel("Wunsch/Vorschlag")
-      .setEmoji("💡")
-      .setStyle(ButtonStyle.Secondary)
+      .setStyle(ButtonStyle.Success)
   );
 }
 
@@ -1389,212 +1372,16 @@ async function postAbsence(interaction) {
   if (!message) {
     return interaction.reply({
       content: "❌ Der Abmeldungs-Channel wurde nicht gefunden.",
-      flags: MessageFlags.Ephemeral,
+      ephemeral: true,
     });
   }
 
   return interaction.reply({
     content: `✅ Deine Abmeldung wurde erfolgreich in <#${CONFIG.absenceChannelId}> eingereicht.`,
-    flags: MessageFlags.Ephemeral,
+    ephemeral: true,
   });
 }
 
-function createSuggestionModal() {
-  const modal = new ModalBuilder()
-    .setCustomId("suggestion_modal")
-    .setTitle("💡 Wunsch/Vorschlag einreichen");
-
-  const titleInput = new TextInputBuilder()
-    .setCustomId("suggestion_title")
-    .setLabel("Titel")
-    .setPlaceholder("z. B. Neue Familienaktion")
-    .setStyle(TextInputStyle.Short)
-    .setMinLength(3)
-    .setMaxLength(80)
-    .setRequired(true);
-
-  const categoryInput = new TextInputBuilder()
-    .setCustomId("suggestion_category")
-    .setLabel("Kategorie/Bereich")
-    .setPlaceholder("z. B. Event, Regel, Verbesserung, Familie")
-    .setStyle(TextInputStyle.Short)
-    .setMinLength(2)
-    .setMaxLength(60)
-    .setRequired(true);
-
-  const suggestionInput = new TextInputBuilder()
-    .setCustomId("suggestion_text")
-    .setLabel("Dein Wunsch/Vorschlag")
-    .setPlaceholder("Beschreibe deinen Vorschlag so genau wie möglich.")
-    .setStyle(TextInputStyle.Paragraph)
-    .setMinLength(10)
-    .setMaxLength(1200)
-    .setRequired(true);
-
-  const reasonInput = new TextInputBuilder()
-    .setCustomId("suggestion_reason")
-    .setLabel("Warum wäre das sinnvoll?")
-    .setPlaceholder("Erkläre kurz, welchen Vorteil dein Vorschlag bringt.")
-    .setStyle(TextInputStyle.Paragraph)
-    .setMinLength(5)
-    .setMaxLength(1000)
-    .setRequired(true);
-
-  modal.addComponents(
-    new ActionRowBuilder().addComponents(titleInput),
-    new ActionRowBuilder().addComponents(categoryInput),
-    new ActionRowBuilder().addComponents(suggestionInput),
-    new ActionRowBuilder().addComponents(reasonInput)
-  );
-
-  return modal;
-}
-
-function createSuggestionEmbed({ title, category, suggestion, reason, userId }) {
-  return new EmbedBuilder()
-    .setColor(CONFIG.warningColor)
-    .setTitle("💡 • WUNSCH / VORSCHLAG")
-    .setDescription(
-      [
-        "━━━━━━━━━━━━━━━━━━━━",
-        `**${title}**`,
-        "━━━━━━━━━━━━━━━━━━━━",
-      ].join("\n")
-    )
-    .addFields(
-      {
-        name: "📌 Kategorie",
-        value: category,
-        inline: true,
-      },
-      {
-        name: "👤 Eingereicht von",
-        value: `<@${userId}>`,
-        inline: true,
-      },
-      {
-        name: "💡 Vorschlag",
-        value: suggestion,
-        inline: false,
-      },
-      {
-        name: "✅ Warum sinnvoll?",
-        value: reason,
-        inline: false,
-      }
-    )
-    .setTimestamp()
-    .setFooter({
-      text: `${CONFIG.shortName} • Wünsche/Vorschläge`,
-    });
-}
-
-async function postSuggestionToForum(interaction) {
-  console.log("🧪 [VORSCHLAG] Modal wurde empfangen.");
-  console.log(`🧪 [VORSCHLAG] User: ${interaction.user.tag} (${interaction.user.id})`);
-  console.log(`🧪 [VORSCHLAG] Guild: ${interaction.guildId}`);
-  console.log(`🧪 [VORSCHLAG] Forum-ID: ${CONFIG.suggestionForumChannelId}`);
-
-  try {
-    console.log("🧪 [VORSCHLAG] deferReply wird ausgeführt...");
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    console.log("✅ [VORSCHLAG] deferReply erfolgreich.");
-
-    const title = interaction.fields.getTextInputValue("suggestion_title").trim();
-    const category = interaction.fields.getTextInputValue("suggestion_category").trim();
-    const suggestion = interaction.fields.getTextInputValue("suggestion_text").trim();
-    const reason = interaction.fields.getTextInputValue("suggestion_reason").trim();
-
-    console.log(`🧪 [VORSCHLAG] Titel: ${title}`);
-    console.log(`🧪 [VORSCHLAG] Kategorie: ${category}`);
-    console.log("🧪 [VORSCHLAG] Forum wird gesucht...");
-
-    const forumChannel = await client.channels.fetch(CONFIG.suggestionForumChannelId).catch((error) => {
-      console.error("❌ [VORSCHLAG] Forum fetch fehlgeschlagen:", error);
-      return null;
-    });
-
-    if (!forumChannel) {
-      console.error("❌ [VORSCHLAG] Forum-Channel wurde nicht gefunden.");
-      return interaction.editReply({
-        content: "❌ Das Wünsche/Vorschläge-Forum wurde nicht gefunden. Prüfe die Forum-Channel-ID.",
-      });
-    }
-
-    console.log(`✅ [VORSCHLAG] Forum gefunden: ${forumChannel.name || "unbekannt"} | Type: ${forumChannel.type}`);
-    console.log(`🧪 [VORSCHLAG] availableTags: ${JSON.stringify(forumChannel.availableTags || [])}`);
-
-    if (!forumChannel.threads) {
-      console.error("❌ [VORSCHLAG] Channel hat keine threads-Funktion. Ist es wirklich ein Forum?");
-      return interaction.editReply({
-        content: "❌ Der angegebene Channel ist kein Forum-Channel oder unterstützt keine Forum-Posts.",
-      });
-    }
-
-    const threadName = `💡 ${truncate(title, 80)}`;
-
-    const firstAvailableTagId = forumChannel.availableTags?.[0]?.id || null;
-
-    console.log(`🧪 [VORSCHLAG] Thread-Name: ${threadName}`);
-    console.log(`🧪 [VORSCHLAG] Genutzter Tag: ${firstAvailableTagId || "kein Tag"}`);
-
-    const threadData = {
-      name: threadName,
-      message: {
-        content: `Neuer Vorschlag von <@${interaction.user.id}>`,
-        embeds: [
-          createSuggestionEmbed({
-            title,
-            category,
-            suggestion,
-            reason,
-            userId: interaction.user.id,
-          }),
-        ],
-        allowedMentions: { users: [interaction.user.id] },
-      },
-      reason: `Wunsch/Vorschlag von ${interaction.user.tag}`,
-    };
-
-    if (firstAvailableTagId) {
-      threadData.appliedTags = [firstAvailableTagId];
-    }
-
-    console.log("🧪 [VORSCHLAG] Forum-Post wird erstellt...");
-    const thread = await forumChannel.threads.create(threadData);
-    console.log(`✅ [VORSCHLAG] Forum-Post erstellt: ${thread.id}`);
-
-    return interaction.editReply({
-      content: `✅ Dein Wunsch/Vorschlag wurde im Forum erstellt: <#${thread.id}>`,
-    });
-  } catch (error) {
-    console.error("❌ [VORSCHLAG] Fehler beim Erstellen eines Forum-Vorschlags:");
-    console.error(error);
-
-    if (error?.rawError) {
-      console.error("❌ [VORSCHLAG] rawError:", JSON.stringify(error.rawError, null, 2));
-    }
-
-    if (error?.code) {
-      console.error("❌ [VORSCHLAG] Discord/API Code:", error.code);
-    }
-
-    try {
-      if (interaction.deferred || interaction.replied) {
-        return interaction.editReply({
-          content: "❌ Der Vorschlag konnte nicht erstellt werden. Prüfe die Railway-Logs, dort steht jetzt die genaue Debug-Meldung.",
-        });
-      }
-
-      return interaction.reply({
-        content: "❌ Der Vorschlag konnte nicht erstellt werden. Prüfe die Railway-Logs, dort steht jetzt die genaue Debug-Meldung.",
-        flags: MessageFlags.Ephemeral,
-      });
-    } catch (replyError) {
-      console.error("❌ [VORSCHLAG] Konnte nicht mal die Fehlermeldung an Discord senden:", replyError);
-    }
-  }
-}
 
 
 // =====================================================
@@ -1687,7 +1474,7 @@ async function handleWeeklyPayment(interaction) {
   if (!latestMember.roles.cache.has(CONFIG.payerRoleId)) {
     return interaction.reply({
       content: "❌ Du hast aktuell nicht die Rolle **Zahlende/r** und musst deshalb keine Wochenabgabe bestätigen.",
-      flags: MessageFlags.Ephemeral,
+      ephemeral: true,
     });
   }
 
@@ -1698,7 +1485,7 @@ async function handleWeeklyPayment(interaction) {
   if (weekData.paidUsers[interaction.user.id]) {
     return interaction.reply({
       content: `ℹ️ Du hast deine Wochenabgabe für **${weekKey}** bereits bestätigt.`,
-      flags: MessageFlags.Ephemeral,
+      ephemeral: true,
     });
   }
 
@@ -1739,7 +1526,7 @@ async function handleWeeklyPayment(interaction) {
 
   return interaction.reply({
     content: `✅ Deine Wochenabgabe für **${weekKey}** wurde als bezahlt gespeichert.`,
-    flags: MessageFlags.Ephemeral,
+    ephemeral: true,
   });
 }
 
@@ -1747,7 +1534,7 @@ async function removeWeeklyPayment(interaction, weekKey, userId) {
   if (!hasLeaderPermission(interaction.member)) {
     return interaction.reply({
       content: "❌ Du hast keine Berechtigung, Wochenabgaben zu korrigieren.",
-      flags: MessageFlags.Ephemeral,
+      ephemeral: true,
     });
   }
 
@@ -1758,7 +1545,7 @@ async function removeWeeklyPayment(interaction, weekKey, userId) {
   if (!payment) {
     return interaction.reply({
       content: "ℹ️ Diese Zahlung ist bereits entfernt oder wurde nicht gefunden.",
-      flags: MessageFlags.Ephemeral,
+      ephemeral: true,
     });
   }
 
@@ -1807,7 +1594,7 @@ async function removeWeeklyPayment(interaction, weekKey, userId) {
 
   return interaction.reply({
     content: `✅ Zahlung von <@${userId}> für **${weekKey}** wurde entfernt.`,
-    flags: MessageFlags.Ephemeral,
+    ephemeral: true,
   });
 }
 
@@ -2139,7 +1926,7 @@ async function createAndPostFootballEvent(interaction) {
   if (!message) {
     return interaction.reply({
       content: "❌ Der Fußball-Event-Channel wurde nicht gefunden.",
-      flags: MessageFlags.Ephemeral,
+      ephemeral: true,
     });
   }
 
@@ -2151,7 +1938,7 @@ async function createAndPostFootballEvent(interaction) {
 
   return interaction.reply({
     content: `✅ Fußball-Event wurde erfolgreich in <#${CONFIG.footballEventChannelId}> erstellt.`,
-    flags: MessageFlags.Ephemeral,
+    ephemeral: true,
   });
 }
 
@@ -2251,7 +2038,6 @@ async function registerCommands() {
 
 client.once("clientReady", async () => {
   console.log(`✅ ${CONFIG.botName} ist online als ${client.user.tag}`);
-  console.log("🧪 DEBUG v16 aktiv: Alle Interactions werden jetzt in Railway geloggt.");
 
   try {
     await registerCommands();
@@ -2318,7 +2104,6 @@ client.on("guildMemberUpdate", async (oldMember, newMember) => {
 
 client.on("interactionCreate", async (interaction) => {
   try {
-    console.log(`🧪 [INTERACTION] Eingang: type=${interaction.type} customId=${interaction.customId || "-"} command=${interaction.commandName || "-"} user=${interaction.user?.tag || "-"} (${interaction.user?.id || "-"})`);
     // -------------------------------
     // Slash Commands
     // -------------------------------
@@ -2334,14 +2119,14 @@ client.on("interactionCreate", async (interaction) => {
 
       return interaction.reply({
         content: `✅ Registrierungspanel wurde erfolgreich in <#${CONFIG.registrationChannelId}> gesendet.`,
-        flags: MessageFlags.Ephemeral,
+        ephemeral: true,
       });
     }
 
     if (interaction.isChatInputCommand() && interaction.commandName === "aufstellung-test") {
       await interaction.reply({
         content: "✅ Test wird ausgeführt. Ich prüfe, ob für heute eine Aufstellung erstellt werden soll.",
-        flags: MessageFlags.Ephemeral,
+        ephemeral: true,
       });
 
       await createLineupForToday("manual-test");
@@ -2352,7 +2137,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!hasLeaderPermission(interaction.member)) {
         return interaction.reply({
           content: "❌ Du hast keine Berechtigung für das Leaderpanel.",
-          flags: MessageFlags.Ephemeral,
+          ephemeral: true,
         });
       }
 
@@ -2363,7 +2148,7 @@ client.on("interactionCreate", async (interaction) => {
 
       return interaction.reply({
         content: "✅ Leaderpanel wurde gesendet.",
-        flags: MessageFlags.Ephemeral,
+        ephemeral: true,
       });
     }
 
@@ -2375,7 +2160,7 @@ client.on("interactionCreate", async (interaction) => {
 
       return interaction.reply({
         content: "✅ Familienpanel wurde gesendet.",
-        flags: MessageFlags.Ephemeral,
+        ephemeral: true,
       });
     }
 
@@ -2383,20 +2168,20 @@ client.on("interactionCreate", async (interaction) => {
       if (!hasLeaderPermission(interaction.member)) {
         return interaction.reply({
           content: "❌ Du hast keine Berechtigung für diesen Befehl.",
-          flags: MessageFlags.Ephemeral,
+          ephemeral: true,
         });
       }
 
       await interaction.reply({
         content: "⏳ Ich prüfe jetzt alle Mitglieder und vergebe/entferne die Zahlende/r-Rolle automatisch.",
-        flags: MessageFlags.Ephemeral,
+        ephemeral: true,
       });
 
       await syncAllPayerRoles(`Manueller Sync von ${interaction.user.tag}`);
 
       return interaction.followUp({
         content: "✅ Zahlende/r-Rollen wurden geprüft.",
-        flags: MessageFlags.Ephemeral,
+        ephemeral: true,
       });
     }
 
@@ -2404,13 +2189,13 @@ client.on("interactionCreate", async (interaction) => {
       if (!hasLeaderPermission(interaction.member)) {
         return interaction.reply({
           content: "❌ Du hast keine Berechtigung für diesen Befehl.",
-          flags: MessageFlags.Ephemeral,
+          ephemeral: true,
         });
       }
 
       await interaction.reply({
         content: "✅ Wochenabgabe-Übersicht wird erstellt.",
-        flags: MessageFlags.Ephemeral,
+        ephemeral: true,
       });
 
       await postWeeklyPaymentOverview(`Manuell von ${interaction.user.tag}`);
@@ -2428,16 +2213,6 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.isButton() && interaction.customId === "family_weekly_payment") {
       return handleWeeklyPayment(interaction);
-    }
-
-    if (interaction.isButton() && interaction.customId === "family_suggestion") {
-      console.log("🧪 [VORSCHLAG] Button family_suggestion wurde geklickt. Modal wird geöffnet.");
-      return interaction.showModal(createSuggestionModal());
-    }
-
-    if (interaction.isModalSubmit() && interaction.customId === "suggestion_modal") {
-      console.log("🧪 [INTERACTION] suggestion_modal wurde im Handler erkannt.");
-      return postSuggestionToForum(interaction);
     }
 
     if (interaction.isButton() && interaction.customId.startsWith("weekly_remove_")) {
@@ -2464,7 +2239,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!hasLeaderPermission(interaction.member)) {
         return interaction.reply({
           content: "❌ Du hast keine Berechtigung, Fußball-Events zu erstellen.",
-          flags: MessageFlags.Ephemeral,
+          ephemeral: true,
         });
       }
 
@@ -2478,7 +2253,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!firstName || !lastName) {
         return interaction.reply({
           content: "❌ Bitte gib einen gültigen Vor- und Nachnamen ein.",
-          flags: MessageFlags.Ephemeral,
+          ephemeral: true,
         });
       }
 
@@ -2487,7 +2262,7 @@ client.on("interactionCreate", async (interaction) => {
       if (newNickname.length > 32) {
         return interaction.reply({
           content: "❌ Der Name ist leider zu lang. Discord erlaubt maximal 32 Zeichen beim Nickname.",
-          flags: MessageFlags.Ephemeral,
+          ephemeral: true,
         });
       }
 
@@ -2496,7 +2271,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!member) {
         return interaction.reply({
           content: "❌ Dein Serverprofil konnte nicht gefunden werden.",
-          flags: MessageFlags.Ephemeral,
+          ephemeral: true,
         });
       }
 
@@ -2516,7 +2291,7 @@ client.on("interactionCreate", async (interaction) => {
 
       return interaction.reply({
         content: replyMessage,
-        flags: MessageFlags.Ephemeral,
+        ephemeral: true,
       });
     }
 
@@ -2540,7 +2315,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!selectedStatus) {
         return interaction.reply({
           content: "❌ Ungültige Auswahl.",
-          flags: MessageFlags.Ephemeral,
+          ephemeral: true,
         });
       }
 
@@ -2550,7 +2325,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!lineup) {
         return interaction.reply({
           content: "❌ Diese Aufstellung wurde nicht im Speicher gefunden. Bitte melde dich beim Team.",
-          flags: MessageFlags.Ephemeral,
+          ephemeral: true,
         });
       }
 
@@ -2576,7 +2351,7 @@ client.on("interactionCreate", async (interaction) => {
 
       return interaction.reply({
         content: `✅ Deine Auswahl wurde gespeichert: **${statusText}**`,
-        flags: MessageFlags.Ephemeral,
+        ephemeral: true,
       });
     }
 
@@ -2600,7 +2375,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!selectedStatus) {
         return interaction.reply({
           content: "❌ Ungültige Auswahl.",
-          flags: MessageFlags.Ephemeral,
+          ephemeral: true,
         });
       }
 
@@ -2610,7 +2385,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!event) {
         return interaction.reply({
           content: "❌ Dieses Fußball-Event wurde nicht im Speicher gefunden. Bitte melde dich beim Team.",
-          flags: MessageFlags.Ephemeral,
+          ephemeral: true,
         });
       }
 
@@ -2636,7 +2411,7 @@ client.on("interactionCreate", async (interaction) => {
 
       return interaction.reply({
         content: `✅ Deine Auswahl wurde gespeichert: **${statusText}**`,
-        flags: MessageFlags.Ephemeral,
+        ephemeral: true,
       });
     }
 
@@ -2653,7 +2428,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!hasLeaderPermission(interaction.member)) {
         return interaction.reply({
           content: "❌ Du hast keine Berechtigung für diese Aktion.",
-          flags: MessageFlags.Ephemeral,
+          ephemeral: true,
         });
       }
     }
@@ -2664,7 +2439,7 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.reply({
         content: createSanctionDraftText(interaction.user.id),
         components: createSanctionBuilderComponents(interaction.user.id),
-        flags: MessageFlags.Ephemeral,
+        ephemeral: true,
       });
     }
 
@@ -2729,21 +2504,21 @@ client.on("interactionCreate", async (interaction) => {
       if (!record) {
         return interaction.reply({
           content: "❌ Diese Sanktion wurde nicht im Speicher gefunden.",
-          flags: MessageFlags.Ephemeral,
+          ephemeral: true,
         });
       }
 
       if (record.paid) {
         return interaction.reply({
           content: "ℹ️ Diese Sanktion wurde bereits als bezahlt markiert und kann nicht mehr storniert werden.",
-          flags: MessageFlags.Ephemeral,
+          ephemeral: true,
         });
       }
 
       if (record.cancelled) {
         return interaction.reply({
           content: "ℹ️ Diese Sanktion wurde bereits storniert.",
-          flags: MessageFlags.Ephemeral,
+          ephemeral: true,
         });
       }
 
@@ -2777,7 +2552,7 @@ client.on("interactionCreate", async (interaction) => {
 
       return interaction.reply({
         content: "✅ Sanktion wurde storniert.",
-        flags: MessageFlags.Ephemeral,
+        ephemeral: true,
       });
     }
 
@@ -2789,21 +2564,21 @@ client.on("interactionCreate", async (interaction) => {
       if (!record) {
         return interaction.reply({
           content: "❌ Diese Sanktion wurde nicht im Speicher gefunden.",
-          flags: MessageFlags.Ephemeral,
+          ephemeral: true,
         });
       }
 
       if (record.paid) {
         return interaction.reply({
           content: "ℹ️ Diese Sanktion wurde bereits als bezahlt markiert.",
-          flags: MessageFlags.Ephemeral,
+          ephemeral: true,
         });
       }
 
       if (record.cancelled) {
         return interaction.reply({
           content: "ℹ️ Diese Sanktion wurde bereits storniert.",
-          flags: MessageFlags.Ephemeral,
+          ephemeral: true,
         });
       }
 
@@ -2837,7 +2612,7 @@ client.on("interactionCreate", async (interaction) => {
 
       return interaction.reply({
         content: "✅ Sanktion wurde als bezahlt markiert.",
-        flags: MessageFlags.Ephemeral,
+        ephemeral: true,
       });
     }
   } catch (error) {
@@ -2849,13 +2624,13 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.replied || interaction.deferred) {
       return interaction.followUp({
         content: errorMessage,
-        flags: MessageFlags.Ephemeral,
+        ephemeral: true,
       }).catch(() => {});
     }
 
     return interaction.reply({
       content: errorMessage,
-      flags: MessageFlags.Ephemeral,
+      ephemeral: true,
     }).catch(() => {});
   }
 });
