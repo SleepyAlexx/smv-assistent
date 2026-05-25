@@ -29,6 +29,8 @@
 // HINWEIS: Der automatische Zahlende/r-Start-Sync bleibt bewusst als Sicherheitsnetz drin.
 // UPDATE: Abmeldungs-Embed wurde schöner und übersichtlicher gestaltet.
 // UPDATE: Button Wunsch/Vorschlag erstellt automatisch einen Forum-Post.
+// FIX: Forum-Post wird jetzt mit deferReply erstellt, damit kein Formular-Timeout entsteht.
+// FIX: Falls das Forum Tags hat, wird automatisch der erste verfügbare Tag genutzt.
 //
 // Leader/Sanktionsrechte:
 // Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
@@ -1485,44 +1487,62 @@ function createSuggestionEmbed({ title, category, suggestion, reason, userId }) 
 }
 
 async function postSuggestionToForum(interaction) {
-  const title = interaction.fields.getTextInputValue("suggestion_title").trim();
-  const category = interaction.fields.getTextInputValue("suggestion_category").trim();
-  const suggestion = interaction.fields.getTextInputValue("suggestion_text").trim();
-  const reason = interaction.fields.getTextInputValue("suggestion_reason").trim();
+  await interaction.deferReply({ ephemeral: true });
 
-  const forumChannel = await client.channels.fetch(CONFIG.suggestionForumChannelId).catch(() => null);
+  try {
+    const title = interaction.fields.getTextInputValue("suggestion_title").trim();
+    const category = interaction.fields.getTextInputValue("suggestion_category").trim();
+    const suggestion = interaction.fields.getTextInputValue("suggestion_text").trim();
+    const reason = interaction.fields.getTextInputValue("suggestion_reason").trim();
 
-  if (!forumChannel || !forumChannel.threads) {
-    return interaction.reply({
-      content: "❌ Das Wünsche/Vorschläge-Forum wurde nicht gefunden oder ist kein Forum-Channel.",
-      ephemeral: true,
+    const forumChannel = await client.channels.fetch(CONFIG.suggestionForumChannelId).catch(() => null);
+
+    if (!forumChannel || !forumChannel.threads) {
+      return interaction.editReply({
+        content: "❌ Das Wünsche/Vorschläge-Forum wurde nicht gefunden oder ist kein Forum-Channel.",
+      });
+    }
+
+    const threadName = `💡 ${truncate(title, 80)}`;
+
+    // Manche Foren haben Pflicht-Tags oder vorgegebene Tags.
+    // Wenn Tags vorhanden sind, nutzt der Bot automatisch den ersten verfügbaren Tag.
+    const firstAvailableTagId = forumChannel.availableTags?.[0]?.id || null;
+
+    const threadData = {
+      name: threadName,
+      message: {
+        content: `Neuer Vorschlag von <@${interaction.user.id}>`,
+        embeds: [
+          createSuggestionEmbed({
+            title,
+            category,
+            suggestion,
+            reason,
+            userId: interaction.user.id,
+          }),
+        ],
+        allowedMentions: { users: [interaction.user.id] },
+      },
+      reason: `Wunsch/Vorschlag von ${interaction.user.tag}`,
+    };
+
+    if (firstAvailableTagId) {
+      threadData.appliedTags = [firstAvailableTagId];
+    }
+
+    const thread = await forumChannel.threads.create(threadData);
+
+    return interaction.editReply({
+      content: `✅ Dein Wunsch/Vorschlag wurde im Forum erstellt: <#${thread.id}>`,
+    });
+  } catch (error) {
+    console.error("❌ Fehler beim Erstellen eines Forum-Vorschlags:", error);
+
+    return interaction.editReply({
+      content: "❌ Der Vorschlag konnte nicht erstellt werden. Prüfe bitte, ob der Bot im Forum **Beiträge erstellen**, **Threads erstellen**, **In Threads schreiben** und **Links einbetten** darf.",
     });
   }
-
-  const threadName = `💡 ${truncate(title, 80)}`;
-
-  const thread = await forumChannel.threads.create({
-    name: threadName,
-    message: {
-      content: `Neuer Vorschlag von <@${interaction.user.id}>`,
-      embeds: [
-        createSuggestionEmbed({
-          title,
-          category,
-          suggestion,
-          reason,
-          userId: interaction.user.id,
-        }),
-      ],
-      allowedMentions: { users: [interaction.user.id] },
-    },
-    reason: `Wunsch/Vorschlag von ${interaction.user.tag}`,
-  });
-
-  return interaction.reply({
-    content: `✅ Dein Wunsch/Vorschlag wurde im Forum erstellt: <#${thread.id}>`,
-    ephemeral: true,
-  });
 }
 
 
