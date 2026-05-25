@@ -31,6 +31,7 @@
 // UPDATE: Wochenabgabe-Logs zeigen jetzt den Discord-Namen und deutsche Zeitangaben.
 // UPDATE: Sonntagsübersicht zeigt ebenfalls Namen und deutsche Zeitangaben.
 // FIX: Wochenabgabe-Logs zeigen immer einen lesbaren Usernamen statt nur <@ID>.
+// UPDATE: Wochenabgabe kann jetzt für 1 bis 6 Wochen im Voraus bestätigt werden.
 // UPDATE: Abmeldungs-Embed wurde schöner und übersichtlicher gestaltet.
 //
 // Leader/Sanktionsrechte:
@@ -1431,6 +1432,20 @@ function getWeekKey(date = new Date()) {
   return `${year}-KW${String(weekNo).padStart(2, "0")}`;
 }
 
+function getFutureWeekKey(offsetWeeks = 0) {
+  const date = new Date(Date.now() + offsetWeeks * 7 * 24 * 60 * 60 * 1000);
+  return getWeekKey(date);
+}
+
+function getWeekKeysFromNow(count = 1) {
+  return Array.from({ length: count }, (_, index) => getFutureWeekKey(index));
+}
+
+function formatWeekList(weekKeys) {
+  if (!weekKeys || weekKeys.length === 0) return "—";
+  return weekKeys.map((weekKey) => `• ${weekKey}`).join("\n");
+}
+
 function ensureWeeklyPaymentData(data, weekKey = getWeekKey()) {
   if (!data.weeklyPayments) data.weeklyPayments = {};
 
@@ -1445,10 +1460,10 @@ function ensureWeeklyPaymentData(data, weekKey = getWeekKey()) {
   return data.weeklyPayments[weekKey];
 }
 
-function createWeeklyPaymentLogButtons(weekKey, userId, removed = false) {
+function createWeeklyPaymentLogButtons(identifier, userId, removed = false) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId(`weekly_remove_${weekKey}_${userId}`)
+      .setCustomId(`weekly_remove_${identifier}_${userId}`)
       .setLabel(removed ? "Entfernt" : "Zahlung entfernen")
       .setEmoji("❌")
       .setStyle(ButtonStyle.Secondary)
@@ -1456,8 +1471,10 @@ function createWeeklyPaymentLogButtons(weekKey, userId, removed = false) {
   );
 }
 
-function createWeeklyPaymentLogEmbed({ userId, userName, weekKey, paidAt, removed = false, removedBy = null, removedByName = null, removedAt = null }) {
+function createWeeklyPaymentLogEmbed({ userId, userName, weekKey = null, weekKeys = null, paidAt, removed = false, removedBy = null, removedByName = null, removedAt = null }) {
   const displayName = userName || "Unbekannter User";
+  const weeks = weekKeys || (weekKey ? [weekKey] : []);
+  const weekTitle = weeks.length === 1 ? "Woche" : "Wochen";
 
   if (removed) {
     return new EmbedBuilder()
@@ -1468,7 +1485,8 @@ function createWeeklyPaymentLogEmbed({ userId, userName, weekKey, paidAt, remove
           "━━━━━━━━━━━━━━━━━━━━",
           `**Name:** ${displayName}`,
           `**Discord:** <@${userId}>`,
-          `**Woche:** ${weekKey}`,
+          `**${weekTitle}:**`,
+          formatWeekList(weeks),
           `**Status:** Zahlung wurde entfernt`,
           `**Entfernt von:** ${removedByName || "Unbekannter User"} (<@${removedBy}>)`,
           `**Zeitpunkt:** ${formatGermanDateTimeFromMs(removedAt)}`,
@@ -1486,7 +1504,9 @@ function createWeeklyPaymentLogEmbed({ userId, userName, weekKey, paidAt, remove
         "━━━━━━━━━━━━━━━━━━━━",
         `**Name:** ${displayName}`,
         `**Discord:** <@${userId}>`,
-        `**Woche:** ${weekKey}`,
+        `**${weekTitle}:**`,
+        formatWeekList(weeks),
+        `**Zeitraum:** ${weeks.length} ${weeks.length === 1 ? "Woche" : "Wochen"}`,
         `**Zeitpunkt:** ${formatGermanDateTimeFromMs(paidAt)}`,
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
@@ -1494,13 +1514,35 @@ function createWeeklyPaymentLogEmbed({ userId, userName, weekKey, paidAt, remove
     .setFooter({ text: `${CONFIG.shortName} • Wochenabgabe` });
 }
 
-async function handleWeeklyPayment(interaction) {
+function createWeeklyPaymentSelectRow() {
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("weekly_payment_select")
+      .setPlaceholder("Für wie viele Wochen möchtest du bezahlen?")
+      .setMinValues(1)
+      .setMaxValues(1)
+      .addOptions(
+        { label: "1 Woche", description: "Aktuelle Woche bestätigen", value: "1", emoji: "1️⃣" },
+        { label: "2 Wochen", description: "Aktuelle + nächste Woche bestätigen", value: "2", emoji: "2️⃣" },
+        { label: "3 Wochen", description: "Aktuelle + 2 weitere Wochen bestätigen", value: "3", emoji: "3️⃣" },
+        { label: "4 Wochen", description: "Aktuelle + 3 weitere Wochen bestätigen", value: "4", emoji: "4️⃣" },
+        { label: "5 Wochen", description: "Aktuelle + 4 weitere Wochen bestätigen", value: "5", emoji: "5️⃣" },
+        { label: "6 Wochen", description: "Aktuelle + 5 weitere Wochen bestätigen", value: "6", emoji: "6️⃣" }
+      )
+  );
+}
+
+async function getLatestMemberForWeeklyPayment(interaction) {
   const member = interaction.member;
   const freshMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => member);
 
-  await syncPayerRole(freshMember, "Wochenabgabe Button - Zahlende/r Prüfung");
+  await syncPayerRole(freshMember, "Wochenabgabe - Zahlende/r Prüfung");
 
-  const latestMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => freshMember);
+  return await interaction.guild.members.fetch(interaction.user.id).catch(() => freshMember);
+}
+
+async function handleWeeklyPayment(interaction) {
+  const latestMember = await getLatestMemberForWeeklyPayment(interaction);
 
   if (!latestMember.roles.cache.has(CONFIG.payerRoleId)) {
     return interaction.reply({
@@ -1509,28 +1551,67 @@ async function handleWeeklyPayment(interaction) {
     });
   }
 
-  const weekKey = getWeekKey();
-  const data = loadData();
-  const weekData = ensureWeeklyPaymentData(data, weekKey);
-  const userName = getReadableUserName(latestMember, interaction.user);
+  return interaction.reply({
+    content: [
+      "💸 **Wochenabgabe bestätigen**",
+      "",
+      "Wähle aus, für wie viele Wochen du deine Wochenabgabe bezahlt hast.",
+      "Du kannst bis zu **6 Wochen** im Voraus bestätigen.",
+    ].join("\n"),
+    components: [createWeeklyPaymentSelectRow()],
+    ephemeral: true,
+  });
+}
 
-  if (weekData.paidUsers[interaction.user.id]) {
+async function handleWeeklyPaymentSelection(interaction) {
+  const latestMember = await getLatestMemberForWeeklyPayment(interaction);
+
+  if (!latestMember.roles.cache.has(CONFIG.payerRoleId)) {
     return interaction.reply({
-      content: `ℹ️ Du hast deine Wochenabgabe für **${weekKey}** bereits bestätigt.`,
+      content: "❌ Du hast aktuell nicht die Rolle **Zahlende/r** und musst deshalb keine Wochenabgabe bestätigen.",
       ephemeral: true,
     });
   }
 
+  const weekCount = Math.min(Math.max(Number(interaction.values[0]) || 1, 1), 6);
+  const selectedWeekKeys = getWeekKeysFromNow(weekCount);
+
+  const data = loadData();
+  const userName = getReadableUserName(latestMember, interaction.user);
   const paidAt = Date.now();
+  const batchId = createShortId();
 
-  weekData.paidUsers[interaction.user.id] = {
-    userId: interaction.user.id,
-    userName,
-    paidAt,
-    logMessageId: null,
-  };
+  const newlySavedWeeks = [];
+  const alreadyPaidWeeks = [];
 
-  data.weeklyPayments[weekKey] = weekData;
+  for (const weekKey of selectedWeekKeys) {
+    const weekData = ensureWeeklyPaymentData(data, weekKey);
+
+    if (weekData.paidUsers[interaction.user.id]) {
+      alreadyPaidWeeks.push(weekKey);
+      continue;
+    }
+
+    weekData.paidUsers[interaction.user.id] = {
+      userId: interaction.user.id,
+      userName,
+      paidAt,
+      batchId,
+      batchWeekKeys: selectedWeekKeys,
+      logMessageId: null,
+    };
+
+    data.weeklyPayments[weekKey] = weekData;
+    newlySavedWeeks.push(weekKey);
+  }
+
+  if (newlySavedWeeks.length === 0) {
+    return interaction.update({
+      content: `ℹ️ Du hast deine Wochenabgabe für diese Auswahl bereits bestätigt.\n\n**Bereits bezahlt:**\n${formatWeekList(alreadyPaidWeeks)}`,
+      components: [],
+    });
+  }
+
   saveData(data);
 
   const logMessage = await sendToChannel(CONFIG.weeklyPaymentChannelId, {
@@ -1538,33 +1619,50 @@ async function handleWeeklyPayment(interaction) {
       createWeeklyPaymentLogEmbed({
         userId: interaction.user.id,
         userName,
-        weekKey,
+        weekKeys: newlySavedWeeks,
         paidAt,
       }),
     ],
     components: [
-      createWeeklyPaymentLogButtons(weekKey, interaction.user.id),
+      createWeeklyPaymentLogButtons(batchId, interaction.user.id),
     ],
   });
 
   if (logMessage) {
     const freshData = loadData();
-    const freshWeekData = ensureWeeklyPaymentData(freshData, weekKey);
 
-    if (freshWeekData.paidUsers[interaction.user.id]) {
-      freshWeekData.paidUsers[interaction.user.id].logMessageId = logMessage.id;
-      freshData.weeklyPayments[weekKey] = freshWeekData;
-      saveData(freshData);
+    for (const weekKey of newlySavedWeeks) {
+      const freshWeekData = ensureWeeklyPaymentData(freshData, weekKey);
+
+      if (freshWeekData.paidUsers[interaction.user.id]) {
+        freshWeekData.paidUsers[interaction.user.id].logMessageId = logMessage.id;
+        freshWeekData.paidUsers[interaction.user.id].batchId = batchId;
+        freshWeekData.paidUsers[interaction.user.id].batchWeekKeys = newlySavedWeeks;
+        freshData.weeklyPayments[weekKey] = freshWeekData;
+      }
     }
+
+    saveData(freshData);
   }
 
-  return interaction.reply({
-    content: `✅ Deine Wochenabgabe für **${weekKey}** wurde als bezahlt gespeichert.`,
-    ephemeral: true,
+  let replyText = [
+    `✅ Deine Wochenabgabe wurde gespeichert.`,
+    "",
+    "**Gespeichert für:**",
+    formatWeekList(newlySavedWeeks),
+  ];
+
+  if (alreadyPaidWeeks.length > 0) {
+    replyText.push("", "**Bereits vorher bezahlt:**", formatWeekList(alreadyPaidWeeks));
+  }
+
+  return interaction.update({
+    content: replyText.join("\n"),
+    components: [],
   });
 }
 
-async function removeWeeklyPayment(interaction, weekKey, userId) {
+async function removeWeeklyPayment(interaction, identifier, userId) {
   if (!hasLeaderPermission(interaction.member)) {
     return interaction.reply({
       content: "❌ Du hast keine Berechtigung, Wochenabgaben zu korrigieren.",
@@ -1573,31 +1671,47 @@ async function removeWeeklyPayment(interaction, weekKey, userId) {
   }
 
   const data = loadData();
-  const weekData = ensureWeeklyPaymentData(data, weekKey);
-  const payment = weekData.paidUsers[userId];
+  const removedAt = Date.now();
+  const removedBy = interaction.user.id;
+  const removedByName = getReadableUserName(interaction.member, interaction.user);
 
-  if (!payment) {
+  const removedWeeks = [];
+  let paymentInfo = null;
+
+  // Neue Logik: identifier ist meistens batchId.
+  for (const [weekKey, weekData] of Object.entries(data.weeklyPayments || {})) {
+    const payment = weekData.paidUsers?.[userId];
+
+    if (!payment) continue;
+
+    const matchesBatch = payment.batchId && payment.batchId === identifier;
+    const matchesLegacySingle = weekKey === identifier;
+
+    if (!matchesBatch && !matchesLegacySingle) continue;
+
+    if (!paymentInfo) paymentInfo = payment;
+
+    delete weekData.paidUsers[userId];
+    data.weeklyPayments[weekKey] = weekData;
+    removedWeeks.push(weekKey);
+  }
+
+  if (removedWeeks.length === 0 || !paymentInfo) {
     return interaction.reply({
       content: "ℹ️ Diese Zahlung ist bereits entfernt oder wurde nicht gefunden.",
       ephemeral: true,
     });
   }
 
-  const removedAt = Date.now();
-  const removedBy = interaction.user.id;
-  const removedByName = getReadableUserName(interaction.member, interaction.user);
-
-  delete weekData.paidUsers[userId];
-  data.weeklyPayments[weekKey] = weekData;
   saveData(data);
 
   await interaction.message.edit({
     embeds: [
       createWeeklyPaymentLogEmbed({
         userId,
-        userName: payment.userName,
-        weekKey,
-        paidAt: payment.paidAt,
+        userName: paymentInfo.userName,
+        weekKeys: removedWeeks,
+        paidAt: paymentInfo.paidAt,
         removed: true,
         removedBy,
         removedByName,
@@ -1605,7 +1719,7 @@ async function removeWeeklyPayment(interaction, weekKey, userId) {
       }),
     ],
     components: [
-      createWeeklyPaymentLogButtons(weekKey, userId, true),
+      createWeeklyPaymentLogButtons(identifier, userId, true),
     ],
   }).catch(() => {});
 
@@ -1617,9 +1731,10 @@ async function removeWeeklyPayment(interaction, weekKey, userId) {
         .setDescription(
           [
             "━━━━━━━━━━━━━━━━━━━━",
-            `**Name:** ${payment.userName || `<@${userId}>`}`,
+            `**Name:** ${paymentInfo.userName || `<@${userId}>`}`,
             `**Discord:** <@${userId}>`,
-            `**Woche:** ${weekKey}`,
+            `**Entfernte Wochen:**`,
+            formatWeekList(removedWeeks),
             `**Aktion:** Zahlung wurde aus der Bezahlt-Liste entfernt`,
             `**Geändert von:** ${removedByName} (<@${removedBy}>)`,
             `**Zeitpunkt:** ${formatGermanDateTimeFromMs(removedAt)}`,
@@ -1631,10 +1746,11 @@ async function removeWeeklyPayment(interaction, weekKey, userId) {
   });
 
   return interaction.reply({
-    content: `✅ Zahlung von <@${userId}> für **${weekKey}** wurde entfernt.`,
+    content: `✅ Zahlung von <@${userId}> wurde entfernt.\n\n**Entfernte Wochen:**\n${formatWeekList(removedWeeks)}`,
     ephemeral: true,
   });
 }
+
 
 async function getPayerMembers(guild) {
   const members = await guild.members.fetch();
@@ -2253,12 +2369,16 @@ client.on("interactionCreate", async (interaction) => {
       return handleWeeklyPayment(interaction);
     }
 
+    if (interaction.isStringSelectMenu() && interaction.customId === "weekly_payment_select") {
+      return handleWeeklyPaymentSelection(interaction);
+    }
+
     if (interaction.isButton() && interaction.customId.startsWith("weekly_remove_")) {
       const parts = interaction.customId.split("_");
-      const weekKey = parts[2];
+      const identifier = parts[2];
       const userId = parts[3];
 
-      return removeWeeklyPayment(interaction, weekKey, userId);
+      return removeWeeklyPayment(interaction, identifier, userId);
     }
 
     if (interaction.isModalSubmit() && interaction.customId === "absence_modal") {
