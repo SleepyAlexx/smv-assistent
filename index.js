@@ -32,7 +32,7 @@
 // FIX: Forum-Post wird jetzt mit deferReply erstellt, damit kein Formular-Timeout entsteht.
 // FIX: Falls das Forum Tags hat, wird automatisch der erste verfügbare Tag genutzt.
 // FIX: Discord.js ephemeral-Warnung behoben: nutzt jetzt MessageFlags.Ephemeral.
-// DEBUG v15: Wunsch/Vorschlag schreibt jetzt genaue Debug-Logs in Railway.
+// DEBUG v16: Start-Marker + jede Interaction wird in Railway geloggt.
 //
 // Leader/Sanktionsrechte:
 // Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
@@ -2251,6 +2251,7 @@ async function registerCommands() {
 
 client.once("clientReady", async () => {
   console.log(`✅ ${CONFIG.botName} ist online als ${client.user.tag}`);
+  console.log("🧪 DEBUG v16 aktiv: Alle Interactions werden jetzt in Railway geloggt.");
 
   try {
     await registerCommands();
@@ -2317,6 +2318,7 @@ client.on("guildMemberUpdate", async (oldMember, newMember) => {
 
 client.on("interactionCreate", async (interaction) => {
   try {
+    console.log(`🧪 [INTERACTION] Eingang: type=${interaction.type} customId=${interaction.customId || "-"} command=${interaction.commandName || "-"} user=${interaction.user?.tag || "-"} (${interaction.user?.id || "-"})`);
     // -------------------------------
     // Slash Commands
     // -------------------------------
@@ -2429,6 +2431,7 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     if (interaction.isButton() && interaction.customId === "family_suggestion") {
+      console.log("🧪 [VORSCHLAG] Button family_suggestion wurde geklickt. Modal wird geöffnet.");
       return interaction.showModal(createSuggestionModal());
     }
 
