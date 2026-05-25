@@ -1,6 +1,6 @@
 // =====================================================
 // SMV-Assistent | Komplettscript
-// Registrierung + Join/Leave + Aufstellung + Leaderpanel/Sanktionen + Fußball-Events + Familienpanel + Wochenabgabe
+// Registrierung + Join/Leave + Aufstellung + Leaderpanel/Sanktionen + Fußball-Events + Familienpanel + Wochenabgabe + Forum-Vorschläge
 //
 // Datei: index.js
 //
@@ -28,6 +28,7 @@
 // UPDATE: Wochenabgabe-System mit Button, Logs, Korrektur und Sonntagsübersicht eingebaut.
 // HINWEIS: Der automatische Zahlende/r-Start-Sync bleibt bewusst als Sicherheitsnetz drin.
 // UPDATE: Abmeldungs-Embed wurde schöner und übersichtlicher gestaltet.
+// UPDATE: Button Wunsch/Vorschlag erstellt automatisch einen Forum-Post.
 //
 // Leader/Sanktionsrechte:
 // Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
@@ -96,6 +97,9 @@ const CONFIG = {
 
   // Familienpanel / Abmeldung
   absenceChannelId: "1434318024076296326",
+
+  // Forum für Wünsche/Vorschläge
+  suggestionForumChannelId: "1508312625350443139",
 
   // Wochenabgabe / Zahlende/r Rollenautomatik
   familyMemberRoleId: "1451314176004984912",
@@ -1236,6 +1240,9 @@ function createFamilyPanelEmbed() {
         "**💸 Wochenabgabe**",
         "└ Bestätige deine Wochenabgabe für die aktuelle Woche.",
         "",
+        "**💡 Wunsch/Vorschlag**",
+        "└ Reiche einen Wunsch oder Vorschlag direkt im Forum ein.",
+        "",
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
     )
@@ -1256,7 +1263,13 @@ function createFamilyPanelButtons() {
       .setCustomId("family_weekly_payment")
       .setLabel("Wochenabgabe bezahlt")
       .setEmoji("💸")
-      .setStyle(ButtonStyle.Success)
+      .setStyle(ButtonStyle.Success),
+
+    new ButtonBuilder()
+      .setCustomId("family_suggestion")
+      .setLabel("Wunsch/Vorschlag")
+      .setEmoji("💡")
+      .setStyle(ButtonStyle.Secondary)
   );
 }
 
@@ -1377,6 +1390,137 @@ async function postAbsence(interaction) {
 
   return interaction.reply({
     content: `✅ Deine Abmeldung wurde erfolgreich in <#${CONFIG.absenceChannelId}> eingereicht.`,
+    ephemeral: true,
+  });
+}
+
+function createSuggestionModal() {
+  const modal = new ModalBuilder()
+    .setCustomId("suggestion_modal")
+    .setTitle("💡 Wunsch/Vorschlag einreichen");
+
+  const titleInput = new TextInputBuilder()
+    .setCustomId("suggestion_title")
+    .setLabel("Titel")
+    .setPlaceholder("z. B. Neue Familienaktion")
+    .setStyle(TextInputStyle.Short)
+    .setMinLength(3)
+    .setMaxLength(80)
+    .setRequired(true);
+
+  const categoryInput = new TextInputBuilder()
+    .setCustomId("suggestion_category")
+    .setLabel("Kategorie/Bereich")
+    .setPlaceholder("z. B. Event, Regel, Verbesserung, Familie")
+    .setStyle(TextInputStyle.Short)
+    .setMinLength(2)
+    .setMaxLength(60)
+    .setRequired(true);
+
+  const suggestionInput = new TextInputBuilder()
+    .setCustomId("suggestion_text")
+    .setLabel("Dein Wunsch/Vorschlag")
+    .setPlaceholder("Beschreibe deinen Vorschlag so genau wie möglich.")
+    .setStyle(TextInputStyle.Paragraph)
+    .setMinLength(10)
+    .setMaxLength(1200)
+    .setRequired(true);
+
+  const reasonInput = new TextInputBuilder()
+    .setCustomId("suggestion_reason")
+    .setLabel("Warum wäre das sinnvoll?")
+    .setPlaceholder("Erkläre kurz, welchen Vorteil dein Vorschlag bringt.")
+    .setStyle(TextInputStyle.Paragraph)
+    .setMinLength(5)
+    .setMaxLength(1000)
+    .setRequired(true);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(titleInput),
+    new ActionRowBuilder().addComponents(categoryInput),
+    new ActionRowBuilder().addComponents(suggestionInput),
+    new ActionRowBuilder().addComponents(reasonInput)
+  );
+
+  return modal;
+}
+
+function createSuggestionEmbed({ title, category, suggestion, reason, userId }) {
+  return new EmbedBuilder()
+    .setColor(CONFIG.warningColor)
+    .setTitle("💡 • WUNSCH / VORSCHLAG")
+    .setDescription(
+      [
+        "━━━━━━━━━━━━━━━━━━━━",
+        `**${title}**`,
+        "━━━━━━━━━━━━━━━━━━━━",
+      ].join("\n")
+    )
+    .addFields(
+      {
+        name: "📌 Kategorie",
+        value: category,
+        inline: true,
+      },
+      {
+        name: "👤 Eingereicht von",
+        value: `<@${userId}>`,
+        inline: true,
+      },
+      {
+        name: "💡 Vorschlag",
+        value: suggestion,
+        inline: false,
+      },
+      {
+        name: "✅ Warum sinnvoll?",
+        value: reason,
+        inline: false,
+      }
+    )
+    .setTimestamp()
+    .setFooter({
+      text: `${CONFIG.shortName} • Wünsche/Vorschläge`,
+    });
+}
+
+async function postSuggestionToForum(interaction) {
+  const title = interaction.fields.getTextInputValue("suggestion_title").trim();
+  const category = interaction.fields.getTextInputValue("suggestion_category").trim();
+  const suggestion = interaction.fields.getTextInputValue("suggestion_text").trim();
+  const reason = interaction.fields.getTextInputValue("suggestion_reason").trim();
+
+  const forumChannel = await client.channels.fetch(CONFIG.suggestionForumChannelId).catch(() => null);
+
+  if (!forumChannel || !forumChannel.threads) {
+    return interaction.reply({
+      content: "❌ Das Wünsche/Vorschläge-Forum wurde nicht gefunden oder ist kein Forum-Channel.",
+      ephemeral: true,
+    });
+  }
+
+  const threadName = `💡 ${truncate(title, 80)}`;
+
+  const thread = await forumChannel.threads.create({
+    name: threadName,
+    message: {
+      content: `Neuer Vorschlag von <@${interaction.user.id}>`,
+      embeds: [
+        createSuggestionEmbed({
+          title,
+          category,
+          suggestion,
+          reason,
+          userId: interaction.user.id,
+        }),
+      ],
+      allowedMentions: { users: [interaction.user.id] },
+    },
+    reason: `Wunsch/Vorschlag von ${interaction.user.tag}`,
+  });
+
+  return interaction.reply({
+    content: `✅ Dein Wunsch/Vorschlag wurde im Forum erstellt: <#${thread.id}>`,
     ephemeral: true,
   });
 }
@@ -2212,6 +2356,14 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.isButton() && interaction.customId === "family_weekly_payment") {
       return handleWeeklyPayment(interaction);
+    }
+
+    if (interaction.isButton() && interaction.customId === "family_suggestion") {
+      return interaction.showModal(createSuggestionModal());
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === "suggestion_modal") {
+      return postSuggestionToForum(interaction);
     }
 
     if (interaction.isButton() && interaction.customId.startsWith("weekly_remove_")) {
