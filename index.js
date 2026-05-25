@@ -1,6 +1,6 @@
 // =====================================================
-// SMV-Assistent | Registrierungspanel
-// Sauberes Script für index.js
+// SMV-Assistent | Registrierung + Rollen + Join/Leave
+// Komplettes Script für index.js
 //
 // Funktionen:
 // ✅ Bot startet sauber über Railway
@@ -8,11 +8,23 @@
 // ✅ User klickt auf "Registrieren"
 // ✅ User gibt Vorname + Nachname ein
 // ✅ Bot setzt automatisch den Nickname: SMV I Vorname Nachname
+// ✅ User bekommt nach Registrierung automatisch Rollen
+// ✅ Automatische Willkommensnachricht, wenn ein User joint
+// ✅ Automatische Leave-Nachricht, wenn ein User leavt
 //
-// Wichtig:
-// - Bot braucht auf Discord die Berechtigung "Nicknamen verwalten"
-// - Die Rolle vom Bot muss über den Rollen der User stehen
-// - Der Server-Owner kann nicht umbenannt werden
+// WICHTIG FÜR JOIN/LEAVE:
+// Für guildMemberAdd und guildMemberRemove brauchst du den Server Members Intent.
+//
+// Discord Developer Portal:
+// 1. Application öffnen
+// 2. Links auf "Bot"
+// 3. Runterscrollen zu "Privileged Gateway Intents"
+// 4. "Server Members Intent" aktivieren
+// 5. Speichern
+//
+// WICHTIG FÜR ROLLEN:
+// - Bot braucht "Rollen verwalten"
+// - Bot-Rolle muss über den Rollen stehen, die er vergeben soll
 // =====================================================
 
 require("dotenv").config();
@@ -42,19 +54,23 @@ const CONFIG = {
   familyName: "Sedoij Medved",
   shortName: "SMV",
 
-  // So wird der Nickname später aussehen:
+  // Nickname-Format:
   // SMV I Alex Kingsley
   nicknamePrefix: "SMV I",
 
-  // Embed-Farbe
+  // Farben
   embedColor: 0x2b2d31,
 
-  // Optional:
-  // Wenn du in Railway eine Variable REGISTRATION_CHANNEL_ID einträgst,
-  // wird das Panel immer in diesen Channel gesendet.
-  // Wenn du keine REGISTRATION_CHANNEL_ID einträgst,
-  // wird das Panel in den Channel gesendet, wo du /registrierpanel ausführst.
-  registrationChannelId: process.env.REGISTRATION_CHANNEL_ID || null,
+  // Channel IDs
+  welcomeChannelId: "1434318022683922543",
+  registrationChannelId: "1508266444390010890",
+  leaveChannelId: "1451317175900962898",
+
+  // Rollen, die nach der Registrierung automatisch vergeben werden
+  registeredRoleIds: [
+    "1451314176004984912",
+    "1434318021412786308",
+  ],
 };
 
 // =====================================================
@@ -77,12 +93,12 @@ function checkEnv() {
 // CLIENT
 // =====================================================
 
-// Wichtig:
-// Wir benutzen hier nur Guilds.
-// Dadurch gibt es keinen Fehler wegen "Used disallowed intents".
+// Für automatische Join/Leave Nachrichten brauchen wir GuildMembers.
+// Dafür muss im Discord Developer Portal der "Server Members Intent" aktiviert sein.
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
   ],
 });
 
@@ -108,6 +124,43 @@ function getGermanDateTime() {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+async function sendToChannel(channelId, payload) {
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+
+  if (!channel) {
+    console.error(`❌ Channel nicht gefunden: ${channelId}`);
+    return false;
+  }
+
+  await channel.send(payload);
+  return true;
+}
+
+async function addRegisteredRoles(member) {
+  const addedRoles = [];
+  const failedRoles = [];
+
+  for (const roleId of CONFIG.registeredRoleIds) {
+    try {
+      const role = await member.guild.roles.fetch(roleId).catch(() => null);
+
+      if (!role) {
+        failedRoles.push(roleId);
+        console.error(`❌ Rolle nicht gefunden: ${roleId}`);
+        continue;
+      }
+
+      await member.roles.add(role, "SMV Registrierung");
+      addedRoles.push(role.name);
+    } catch (error) {
+      failedRoles.push(roleId);
+      console.error(`❌ Rolle konnte nicht vergeben werden (${roleId}):`, error);
+    }
+  }
+
+  return { addedRoles, failedRoles };
 }
 
 function createRegisterPanelEmbed() {
@@ -209,6 +262,48 @@ client.once("clientReady", async () => {
 });
 
 // =====================================================
+// AUTOMATISCHE JOIN NACHRICHT
+// =====================================================
+
+client.on("guildMemberAdd", async (member) => {
+  try {
+    const message = [
+      `Privet ${member},`,
+      `du bist nun Teil der Familie **${CONFIG.familyName}**.`,
+      "**Dobro pozhalovat v semyu**, schön, dass du dabei bist. 🐻",
+      "",
+      `**Bitte registriere dich im folgenden Channel:** <#${CONFIG.registrationChannelId}>`,
+    ].join("\n");
+
+    await sendToChannel(CONFIG.welcomeChannelId, {
+      content: message,
+    });
+
+    console.log(`✅ Willkommensnachricht gesendet für ${member.user.tag}`);
+  } catch (error) {
+    console.error("❌ Fehler bei guildMemberAdd:", error);
+  }
+});
+
+// =====================================================
+// AUTOMATISCHE LEAVE NACHRICHT
+// =====================================================
+
+client.on("guildMemberRemove", async (member) => {
+  try {
+    const message = `Poka, ${member.user.tag}!`;
+
+    await sendToChannel(CONFIG.leaveChannelId, {
+      content: message,
+    });
+
+    console.log(`✅ Leave-Nachricht gesendet für ${member.user.tag}`);
+  } catch (error) {
+    console.error("❌ Fehler bei guildMemberRemove:", error);
+  }
+});
+
+// =====================================================
 // INTERACTIONS
 // =====================================================
 
@@ -219,24 +314,13 @@ client.on("interactionCreate", async (interaction) => {
       const embed = createRegisterPanelEmbed();
       const row = createRegisterButtonRow();
 
-      const targetChannel = CONFIG.registrationChannelId
-        ? await client.channels.fetch(CONFIG.registrationChannelId).catch(() => null)
-        : interaction.channel;
-
-      if (!targetChannel) {
-        return interaction.reply({
-          content: "❌ Der Registrierungschannel wurde nicht gefunden. Prüfe die REGISTRATION_CHANNEL_ID.",
-          ephemeral: true,
-        });
-      }
-
-      await targetChannel.send({
+      await sendToChannel(CONFIG.registrationChannelId, {
         embeds: [embed],
         components: [row],
       });
 
       return interaction.reply({
-        content: "✅ Registrierungspanel wurde erfolgreich gesendet.",
+        content: `✅ Registrierungspanel wurde erfolgreich in <#${CONFIG.registrationChannelId}> gesendet.`,
         ephemeral: true,
       });
     }
@@ -278,8 +362,20 @@ client.on("interactionCreate", async (interaction) => {
 
       await member.setNickname(newNickname, "SMV Registrierung");
 
+      const { addedRoles, failedRoles } = await addRegisteredRoles(member);
+
+      let replyMessage = `✅ Du wurdest erfolgreich registriert.\nDein neuer Name ist: **${newNickname}**`;
+
+      if (addedRoles.length > 0) {
+        replyMessage += `\n\n✅ Rollen wurden vergeben.`;
+      }
+
+      if (failedRoles.length > 0) {
+        replyMessage += `\n\n⚠️ Einige Rollen konnten nicht vergeben werden. Bitte melde dich beim Team.`;
+      }
+
       return interaction.reply({
-        content: `✅ Du wurdest erfolgreich registriert.\nDein neuer Name ist: **${newNickname}**`,
+        content: replyMessage,
         ephemeral: true,
       });
     }
@@ -287,7 +383,7 @@ client.on("interactionCreate", async (interaction) => {
     console.error("❌ Fehler bei einer Interaction:", error);
 
     const errorMessage =
-      "❌ Es ist ein Fehler passiert. Prüfe bitte, ob der Bot **Nicknamen verwalten** darf und seine Rolle über der Rolle des Users steht.";
+      "❌ Es ist ein Fehler passiert. Prüfe bitte, ob der Bot **Nicknamen verwalten** und **Rollen verwalten** darf. Die Bot-Rolle muss über der User-Rolle und über den zu vergebenden Rollen stehen.";
 
     if (interaction.replied || interaction.deferred) {
       return interaction.followUp({
