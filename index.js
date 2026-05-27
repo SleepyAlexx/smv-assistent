@@ -2441,7 +2441,7 @@ function formatMemberListForOverview(membersOrIds, paidUsers = null) {
       .map((member) => {
         const paidAt = paidUsers[member.id]?.paidAt;
         const name = member.displayName || member.user.username;
-        return `╰ ${name} (<@${member.id}>)${paidAt ? ` — ${formatGermanDateTimeFromMs(paidAt)}` : ""}`;
+        return `╰ ${name}${paidAt ? ` — ${formatGermanDateTimeFromMs(paidAt)}` : ""}`;
       })
       .join("\n");
   }
@@ -2449,21 +2449,56 @@ function formatMemberListForOverview(membersOrIds, paidUsers = null) {
   return membersOrIds
     .map((member) => {
       const name = member.displayName || member.user.username;
-      return `╰ ${name} (<@${member.id}>)`;
+      return `╰ ${name}`;
     })
     .join("\n");
 }
 
-function addOverviewListFields(embed, title, text, firstFieldName) {
-  const chunks = chunkText(text, 1000);
+function splitLinesForDiscordFields(text, maxLength = 1000) {
+  const lines = String(text || "—").split("\n");
+  const chunks = [];
+  let current = "";
 
-  chunks.forEach((chunk, index) => {
-    embed.addFields({
-      name: index === 0 ? firstFieldName : "\u200B",
-      value: chunk,
-      inline: false,
-    });
-  });
+  for (const line of lines) {
+    const next = current ? `${current}\n${line}` : line;
+
+    if (next.length > maxLength) {
+      if (current) chunks.push(current);
+      current = line;
+    } else {
+      current = next;
+    }
+  }
+
+  if (current) chunks.push(current);
+
+  return chunks.length > 0 ? chunks : ["—"];
+}
+
+function addPaymentTableFields(embed, unpaidText, paidText, unpaidCount, paidCount) {
+  const unpaidChunks = splitLinesForDiscordFields(unpaidText, 1000);
+  const paidChunks = splitLinesForDiscordFields(paidText, 1000);
+  const rows = Math.max(unpaidChunks.length, paidChunks.length);
+
+  for (let index = 0; index < rows; index++) {
+    embed.addFields(
+      {
+        name: index === 0 ? `❌ Nicht bezahlt (${unpaidCount})` : "\u200B",
+        value: unpaidChunks[index] || "—",
+        inline: true,
+      },
+      {
+        name: index === 0 ? `✅ Bezahlt (${paidCount})` : "\u200B",
+        value: paidChunks[index] || "—",
+        inline: true,
+      },
+      {
+        name: "\u200B",
+        value: "\u200B",
+        inline: true,
+      }
+    );
+  }
 }
 
 
@@ -2596,18 +2631,12 @@ async function postWeeklyPaymentOverview(reason = "scheduled") {
     )
     .setFooter({ text: `${CONFIG.shortName} • Wochenabgabe • ${weekKey}` });
 
-  addOverviewListFields(
+  addPaymentTableFields(
     overviewEmbed,
-    "paid",
-    formatMemberListForOverview(paidMembers, weekData.paidUsers),
-    `✅ Bezahlt (${paidMembers.length})`
-  );
-
-  addOverviewListFields(
-    overviewEmbed,
-    "unpaid",
     formatMemberListForOverview(unpaidMembers),
-    `❌ Nicht bezahlt (${unpaidMembers.length})`
+    formatMemberListForOverview(paidMembers, weekData.paidUsers),
+    unpaidMembers.length,
+    paidMembers.length
   );
 
   await sendToChannel(CONFIG.weeklyPaymentChannelId, {
