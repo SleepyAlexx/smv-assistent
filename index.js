@@ -7,7 +7,7 @@
 // WICHTIG:
 // Für Join/Leave, Nicknames, Rollen und Member-Infos brauchst du:
 // Discord Developer Portal -> Bot -> Privileged Gateway Intents
-// ✅ Server Members Intent aktivieren.
+// ✅ Server Members Intent aktivieren
 //
 // Bot-Rechte auf Discord:
 // ✅ Administrator reicht grundsätzlich
