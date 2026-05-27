@@ -35,6 +35,7 @@
 // UPDATE: Abmeldungs-Embed wurde schöner und übersichtlicher gestaltet.
 // UPDATE: Fußball-Event-Button im Familienpanel ist nur für die freigegebenen Rollen nutzbar.
 // UPDATE: Fußball-Event steht im Familienpanel jetzt vor der Wochenabgabe.
+// UPDATE: Aufstellungsdesign, Schließzeit, Absage-Button und Uhrzeit-Änderung eingebaut.
 //
 // Leader/Sanktionsrechte:
 // Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
@@ -635,12 +636,62 @@ function getLineupTitle(weekday) {
   return weekday === "Sonntag" ? "Pflichtaufstellung" : "Tagesaufstellung";
 }
 
+function getLineupHeadline(lineup) {
+  const title = lineup.title || getLineupTitle(lineup.weekday);
+  return `# 🐻 SMV ${String(title).toUpperCase()}`;
+}
+
+function getLineupStartText(lineup) {
+  return lineup.startTimeText || CONFIG.lineupStartTimeText;
+}
+
+function parseLineupStartMinutes(startText) {
+  const match = String(startText || "").match(/(\d{1,2})[:.](\d{2})/);
+  if (!match) return 20 * 60 + 30;
+
+  const hours = Math.min(Math.max(Number(match[1]) || 0, 0), 23);
+  const minutes = Math.min(Math.max(Number(match[2]) || 0, 0), 59);
+
+  return hours * 60 + minutes;
+}
+
+function getCurrentBerlinMinutes() {
+  const now = getBerlinParts();
+  return Number(now.hour) * 60 + Number(now.minute);
+}
+
+function hasLineupStartPassed(lineup) {
+  const now = getBerlinParts();
+
+  if (now.dateKey > lineup.dateKey) return true;
+  if (now.dateKey < lineup.dateKey) return false;
+
+  return getCurrentBerlinMinutes() >= parseLineupStartMinutes(getLineupStartText(lineup));
+}
+
+function getLineupStatus(lineup) {
+  if (lineup.cancelled) return "Aufstellung abgesagt";
+  if (lineup.closed || hasLineupStartPassed(lineup)) return "Anmeldung geschlossen";
+  return "Anmeldung offen";
+}
+
+function isLineupInteractionClosed(lineup) {
+  return Boolean(lineup.cancelled || lineup.closed || hasLineupStartPassed(lineup));
+}
+
 function createEmptyLineup(dateKey, dateText, weekday) {
   return {
     dateKey,
     dateText,
     weekday,
     title: getLineupTitle(weekday),
+    startTimeText: CONFIG.lineupStartTimeText,
+    closed: false,
+    cancelled: false,
+    cancelledBy: null,
+    cancelledAt: null,
+    lastTimeChangeBy: null,
+    lastTimeChangeAt: null,
     messageId: null,
     users: {},
   };
@@ -655,11 +706,11 @@ function getUsersByStatus(lineup, status) {
     }));
 }
 
-function formatUserList(users, emoji) {
+function formatLineupUserList(users) {
   if (users.length === 0) return "—";
 
   return users
-    .map((user) => `${emoji} ${user.name}`)
+    .map((user) => `╰ ${user.name}`)
     .join("\n")
     .slice(0, 1000);
 }
@@ -669,46 +720,30 @@ function createLineupEmbed(lineup) {
   const absentUsers = getUsersByStatus(lineup, "absent");
   const unsureUsers = getUsersByStatus(lineup, "unsure");
   const total = presentUsers.length + absentUsers.length + unsureUsers.length;
+  const statusText = getLineupStatus(lineup);
 
   return new EmbedBuilder()
-    .setColor(CONFIG.embedColor)
-    .setTitle(lineup.title)
+    .setColor(lineup.cancelled ? CONFIG.dangerColor : statusText === "Anmeldung geschlossen" ? CONFIG.warningColor : CONFIG.embedColor)
     .setDescription(
       [
-        "**Event Info:**",
-        `📅 ${lineup.dateText}`,
-        `🕘 ${CONFIG.lineupStartTimeText}`,
+        getLineupHeadline(lineup),
         "",
-        "**Description:**",
-        "✅ Ihr schafft es pünktlich zur Aufstellung zu kommen.",
-        "❌ Ihr schafft es nicht zur Aufstellung zu kommen.",
-        "⏳ Ihr schafft es in der angegebenen Zeit zur Aufstellung.",
+        `📅 **Datum:** ${lineup.dateText}`,
+        `🕘 **Beginn:** ${getLineupStartText(lineup)}`,
+        `👥 **Rückmeldungen:** ${total}`,
+        "",
+        `✅ **ANWESEND — ${presentUsers.length}**`,
+        formatLineupUserList(presentUsers),
+        "",
+        `❌ **ABWESEND — ${absentUsers.length}**`,
+        formatLineupUserList(absentUsers),
+        "",
+        `⏳ **UNGEWISS — ${unsureUsers.length}**`,
+        formatLineupUserList(unsureUsers),
+        "",
+        `**Status:** ${statusText}`,
+        `**System:** ${CONFIG.shortName} • Aufstellung`,
       ].join("\n")
-    )
-    .addFields(
-      {
-        name: `✅ Anwesend (${presentUsers.length})`,
-        value: formatUserList(presentUsers, "✅"),
-        inline: true,
-      },
-      {
-        name: `❌ Abwesend (${absentUsers.length})`,
-        value: formatUserList(absentUsers, "❌"),
-        inline: true,
-      },
-      {
-        name: `⏳ Ungewiss (${unsureUsers.length})`,
-        value: formatUserList(unsureUsers, "⏳"),
-        inline: true,
-      },
-      {
-        name: "Info",
-        value: [
-          `Sign ups: Total: **${total}**`,
-          `Event start time: **${CONFIG.lineupEventStartText}**`,
-        ].join("\n"),
-        inline: false,
-      }
     )
     .setFooter({
       text: `${CONFIG.shortName} • Aufstellung • ${lineup.dateText}`,
@@ -719,26 +754,73 @@ function createLineupButtons(lineup) {
   const presentUsers = getUsersByStatus(lineup, "present");
   const absentUsers = getUsersByStatus(lineup, "absent");
   const unsureUsers = getUsersByStatus(lineup, "unsure");
+  const closed = isLineupInteractionClosed(lineup);
 
-  return new ActionRowBuilder().addComponents(
+  const participationRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`lineup_present_${lineup.dateKey}`)
       .setLabel(`${presentUsers.length}`)
       .setEmoji("✅")
-      .setStyle(ButtonStyle.Success),
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(closed),
 
     new ButtonBuilder()
       .setCustomId(`lineup_absent_${lineup.dateKey}`)
       .setLabel(`${absentUsers.length}`)
       .setEmoji("❌")
-      .setStyle(ButtonStyle.Secondary),
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(closed),
 
     new ButtonBuilder()
       .setCustomId(`lineup_unsure_${lineup.dateKey}`)
       .setLabel(`${unsureUsers.length}`)
       .setEmoji("⏳")
       .setStyle(ButtonStyle.Primary)
+      .setDisabled(closed)
   );
+
+  const managementRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`lineup_cancel_${lineup.dateKey}`)
+      .setLabel("Aufstellung abgesagt")
+      .setEmoji("🛑")
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(Boolean(lineup.cancelled)),
+
+    new ButtonBuilder()
+      .setCustomId(`lineup_time_${lineup.dateKey}`)
+      .setLabel("Aufstellungsuhrzeit ändern")
+      .setEmoji("🕘")
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  return [participationRow, managementRow];
+}
+
+function createLineupTimeModal(dateKey) {
+  const modal = new ModalBuilder()
+    .setCustomId(`lineup_time_modal_${dateKey}`)
+    .setTitle("🕘 Aufstellungsuhrzeit ändern");
+
+  const timeInput = new TextInputBuilder()
+    .setCustomId("lineup_new_time")
+    .setLabel("Neue Uhrzeit")
+    .setPlaceholder("z. B. 21:00 Uhr")
+    .setStyle(TextInputStyle.Short)
+    .setMinLength(4)
+    .setMaxLength(30)
+    .setRequired(true);
+
+  modal.addComponents(new ActionRowBuilder().addComponents(timeInput));
+
+  return modal;
+}
+
+function normalizeLineupTimeText(input) {
+  const value = String(input || "").trim();
+  if (!value) return CONFIG.lineupStartTimeText;
+  if (/uhr/i.test(value)) return value;
+  return `${value} Uhr`;
 }
 
 async function updateLineupMessage(lineup) {
@@ -758,7 +840,125 @@ async function updateLineupMessage(lineup) {
 
   await message.edit({
     embeds: [createLineupEmbed(lineup)],
-    components: [createLineupButtons(lineup)],
+    components: createLineupButtons(lineup),
+  });
+}
+
+async function announceLineupCancelled(lineup, leaderId) {
+  await sendToChannel(CONFIG.lineupChannelId, {
+    content: [
+      "@everyone",
+      "",
+      "🐻 **SMV AUFSTELLUNG ABGESAGT**",
+      "",
+      "Die heutige Aufstellung wurde von der Leaderschaft abgesagt.",
+      "",
+      `📅 **Datum:** ${lineup.dateText}`,
+      `🕘 **Ursprüngliche Uhrzeit:** ${getLineupStartText(lineup)}`,
+      `👑 **Abgesagt von:** <@${leaderId}>`,
+    ].join("\n"),
+    allowedMentions: { parse: ["everyone"], users: [leaderId] },
+  });
+}
+
+async function announceLineupTimeChanged(lineup, oldTime, newTime, leaderId) {
+  await sendToChannel(CONFIG.lineupChannelId, {
+    content: [
+      "@everyone",
+      "",
+      "🕘 **AUFSTELLUNGSUHRZEIT GEÄNDERT**",
+      "",
+      "Die heutige Aufstellung wurde verschoben.",
+      "",
+      `Alte Uhrzeit: **${oldTime}**`,
+      `Neue Uhrzeit: **${newTime}**`,
+      "",
+      "Bitte beachtet die neue Uhrzeit.",
+      `Uhrzeit geändert von: <@${leaderId}>`,
+    ].join("\n"),
+    allowedMentions: { parse: ["everyone"], users: [leaderId] },
+  });
+}
+
+async function cancelLineup(interaction, dateKey) {
+  if (!hasLeaderPermission(interaction.member)) {
+    return interaction.reply({
+      content: "❌ Du hast keine Berechtigung, die Aufstellung abzusagen.",
+      ephemeral: true,
+    });
+  }
+
+  const data = loadData();
+  const lineup = data.lineups[dateKey];
+
+  if (!lineup) {
+    return interaction.reply({
+      content: "❌ Diese Aufstellung wurde nicht im Speicher gefunden.",
+      ephemeral: true,
+    });
+  }
+
+  if (lineup.cancelled) {
+    return interaction.reply({
+      content: "ℹ️ Diese Aufstellung wurde bereits abgesagt.",
+      ephemeral: true,
+    });
+  }
+
+  lineup.cancelled = true;
+  lineup.closed = true;
+  lineup.cancelledBy = interaction.user.id;
+  lineup.cancelledAt = Date.now();
+
+  data.lineups[dateKey] = lineup;
+  saveData(data);
+
+  await updateLineupMessage(lineup);
+  await announceLineupCancelled(lineup, interaction.user.id);
+
+  return interaction.reply({
+    content: "✅ Aufstellung wurde abgesagt und @everyone wurde informiert.",
+    ephemeral: true,
+  });
+}
+
+async function changeLineupTime(interaction, dateKey) {
+  if (!hasLeaderPermission(interaction.member)) {
+    return interaction.reply({
+      content: "❌ Du hast keine Berechtigung, die Aufstellungsuhrzeit zu ändern.",
+      ephemeral: true,
+    });
+  }
+
+  const data = loadData();
+  const lineup = data.lineups[dateKey];
+
+  if (!lineup) {
+    return interaction.reply({
+      content: "❌ Diese Aufstellung wurde nicht im Speicher gefunden.",
+      ephemeral: true,
+    });
+  }
+
+  const oldTime = getLineupStartText(lineup);
+  const newTime = normalizeLineupTimeText(interaction.fields.getTextInputValue("lineup_new_time"));
+
+  lineup.startTimeText = newTime;
+  lineup.lastTimeChangeBy = interaction.user.id;
+  lineup.lastTimeChangeAt = Date.now();
+
+  // Wenn die neue Uhrzeit noch nicht erreicht ist, wird die Anmeldung wieder geöffnet.
+  lineup.closed = hasLineupStartPassed(lineup);
+
+  data.lineups[dateKey] = lineup;
+  saveData(data);
+
+  await updateLineupMessage(lineup);
+  await announceLineupTimeChanged(lineup, oldTime, newTime, interaction.user.id);
+
+  return interaction.reply({
+    content: `✅ Aufstellungsuhrzeit wurde von **${oldTime}** auf **${newTime}** geändert und @everyone wurde informiert.`,
+    ephemeral: true,
   });
 }
 
@@ -782,7 +982,7 @@ async function createLineupForToday(reason = "scheduled") {
   const message = await sendToChannel(CONFIG.lineupChannelId, {
     content: "@everyone",
     embeds: [createLineupEmbed(lineup)],
-    components: [createLineupButtons(lineup)],
+    components: createLineupButtons(lineup),
     allowedMentions: { parse: ["everyone"] },
   });
 
@@ -814,6 +1014,25 @@ async function checkDailyLineup() {
   if (data.postedDates[now.dateKey]) return;
 
   await createLineupForToday("auto-check");
+}
+
+async function checkLineupClosures() {
+  const data = loadData();
+  let changed = false;
+
+  for (const [dateKey, lineup] of Object.entries(data.lineups || {})) {
+    if (!lineup || lineup.cancelled || lineup.closed) continue;
+
+    if (hasLineupStartPassed(lineup)) {
+      lineup.closed = true;
+      data.lineups[dateKey] = lineup;
+      changed = true;
+      await updateLineupMessage(lineup);
+      console.log(`✅ Aufstellung für ${lineup.dateText} wurde automatisch geschlossen.`);
+    }
+  }
+
+  if (changed) saveData(data);
 }
 
 // =====================================================
@@ -2128,6 +2347,10 @@ function startSchedulers() {
     console.error("❌ Fehler bei erster Wochenabgabe-Prüfung:", error);
   });
 
+  checkLineupClosures().catch((error) => {
+    console.error("❌ Fehler bei erster Aufstellungs-Schließprüfung:", error);
+  });
+
   // Jede Minute prüfen.
   setInterval(() => {
     checkDailyLineup().catch((error) => {
@@ -2140,6 +2363,10 @@ function startSchedulers() {
 
     checkWeeklyPaymentSummary().catch((error) => {
       console.error("❌ Fehler bei Wochenabgabe-Prüfung:", error);
+    });
+
+    checkLineupClosures().catch((error) => {
+      console.error("❌ Fehler bei Aufstellungs-Schließprüfung:", error);
     });
   }, 60 * 1000);
 
@@ -2481,6 +2708,29 @@ client.on("interactionCreate", async (interaction) => {
     // Aufstellung Buttons
     // -------------------------------
 
+    if (interaction.isButton() && interaction.customId.startsWith("lineup_cancel_")) {
+      const dateKey = interaction.customId.replace("lineup_cancel_", "");
+      return cancelLineup(interaction, dateKey);
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith("lineup_time_")) {
+      const dateKey = interaction.customId.replace("lineup_time_", "");
+
+      if (!hasLeaderPermission(interaction.member)) {
+        return interaction.reply({
+          content: "❌ Du hast keine Berechtigung, die Aufstellungsuhrzeit zu ändern.",
+          ephemeral: true,
+        });
+      }
+
+      return interaction.showModal(createLineupTimeModal(dateKey));
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId.startsWith("lineup_time_modal_")) {
+      const dateKey = interaction.customId.replace("lineup_time_modal_", "");
+      return changeLineupTime(interaction, dateKey);
+    }
+
     if (interaction.isButton() && interaction.customId.startsWith("lineup_")) {
       const parts = interaction.customId.split("_");
       const action = parts[1];
@@ -2507,6 +2757,20 @@ client.on("interactionCreate", async (interaction) => {
       if (!lineup) {
         return interaction.reply({
           content: "❌ Diese Aufstellung wurde nicht im Speicher gefunden. Bitte melde dich beim Team.",
+          ephemeral: true,
+        });
+      }
+
+      if (isLineupInteractionClosed(lineup)) {
+        lineup.closed = true;
+        data.lineups[dateKey] = lineup;
+        saveData(data);
+        await updateLineupMessage(lineup);
+
+        return interaction.reply({
+          content: lineup.cancelled
+            ? "❌ Diese Aufstellung wurde abgesagt. Du kannst nicht mehr reagieren."
+            : "❌ Die Anmeldung ist geschlossen. Du kannst nicht mehr reagieren.",
           ephemeral: true,
         });
       }
