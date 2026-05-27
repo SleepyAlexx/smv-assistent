@@ -2405,6 +2405,94 @@ function formatMemberListForOverview(membersOrIds, paidUsers = null) {
     .join("\n");
 }
 
+async function manuallyAddWeeklyPayment(interaction) {
+  if (!hasLeaderPermission(interaction.member)) {
+    return interaction.reply({
+      content: "❌ Du hast keine Berechtigung für diesen Befehl.",
+      ephemeral: true,
+    });
+  }
+
+  const targetUser = interaction.options.getUser("user");
+  const weekCount = Math.min(Math.max(interaction.options.getInteger("wochen") || 1, 1), 6);
+  const selectedWeekKeys = getWeekKeysFromNow(weekCount);
+  const paidAt = Date.now();
+  const batchId = createShortId();
+
+  const targetMember = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
+  const userName = getReadableUserName(targetMember, targetUser);
+
+  const newlySavedWeeks = [];
+  const alreadyPaidWeeks = [];
+
+  for (const weekKey of selectedWeekKeys) {
+    const existingPayment = await getWeeklyPaymentDb(weekKey, targetUser.id);
+
+    if (existingPayment) {
+      alreadyPaidWeeks.push(weekKey);
+      continue;
+    }
+
+    await saveWeeklyPaymentDb({
+      weekKey,
+      userId: targetUser.id,
+      userName,
+      paidAt,
+      batchId,
+      batchWeekKeys: selectedWeekKeys,
+      logMessageId: null,
+    });
+
+    newlySavedWeeks.push(weekKey);
+  }
+
+  if (newlySavedWeeks.length === 0) {
+    return interaction.reply({
+      content: `ℹ️ Für ${targetUser} war diese Auswahl bereits eingetragen.\n\n**Bereits bezahlt:**\n${formatWeekList(alreadyPaidWeeks)}`,
+      ephemeral: true,
+    });
+  }
+
+  const logMessage = await sendToChannel(CONFIG.weeklyPaymentChannelId, {
+    embeds: [
+      createWeeklyPaymentLogEmbed({
+        userId: targetUser.id,
+        userName,
+        weekKeys: newlySavedWeeks,
+        paidAt,
+      }),
+    ],
+    components: [
+      createWeeklyPaymentLogButtons(batchId, targetUser.id),
+    ],
+  });
+
+  if (logMessage) {
+    await updateWeeklyPaymentLogMessageDb({
+      userId: targetUser.id,
+      weekKeys: newlySavedWeeks,
+      batchId,
+      logMessageId: logMessage.id,
+    });
+  }
+
+  const replyLines = [
+    `✅ Wochenabgabe wurde manuell für ${targetUser} eingetragen.`,
+    "",
+    "**Gespeichert für:**",
+    formatWeekList(newlySavedWeeks),
+  ];
+
+  if (alreadyPaidWeeks.length > 0) {
+    replyLines.push("", "**Bereits vorher bezahlt:**", formatWeekList(alreadyPaidWeeks));
+  }
+
+  return interaction.reply({
+    content: replyLines.join("\n"),
+    ephemeral: true,
+  });
+}
+
 async function postWeeklyPaymentOverview(reason = "scheduled") {
   const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(() => null);
 
@@ -2988,6 +3076,26 @@ async function registerCommands() {
       .setDescription("Postet manuell die aktuelle Wochenabgabe-Übersicht")
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
       .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("wochenabgabe-eintragen")
+      .setDescription("Trägt eine Wochenabgabe manuell für 1 bis 6 Wochen ein")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .addUserOption((option) =>
+        option
+          .setName("user")
+          .setDescription("Für welchen User soll die Wochenabgabe eingetragen werden?")
+          .setRequired(true)
+      )
+      .addIntegerOption((option) =>
+        option
+          .setName("wochen")
+          .setDescription("Für wie viele Wochen soll eingetragen werden?")
+          .setRequired(true)
+          .setMinValue(1)
+          .setMaxValue(6)
+      )
+      .toJSON(),
   ];
 
   const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
@@ -3176,6 +3284,10 @@ client.on("interactionCreate", async (interaction) => {
       await postWeeklyPaymentOverview(`Manuell von ${interaction.user.tag}`);
 
       return;
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === "wochenabgabe-eintragen") {
+      return manuallyAddWeeklyPayment(interaction);
     }
 
     // -------------------------------
