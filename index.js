@@ -1937,6 +1937,257 @@ function createWeeklyPaymentSelectRow() {
   );
 }
 
+async function migrateWeeklyPaymentsFromJsonToDatabase() {
+  if (!dbPool) return;
+
+  const metaResult = await dbQuery("SELECT value FROM bot_meta WHERE key = $1", ["weekly_json_migrated"]);
+  if (metaResult.rows.length > 0) return;
+
+  const data = loadData();
+  let migratedPayments = 0;
+  let migratedSummaries = 0;
+
+  for (const [weekKey, weekData] of Object.entries(data.weeklyPayments || {})) {
+    for (const [userId, payment] of Object.entries(weekData.paidUsers || {})) {
+      await dbQuery(
+        `
+        INSERT INTO weekly_payments
+          (week_key, user_id, user_name, paid_at, batch_id, batch_week_keys, log_message_id, removed)
+        VALUES
+          ($1, $2, $3, $4, $5, $6::jsonb, $7, false)
+        ON CONFLICT (week_key, user_id)
+        DO NOTHING;
+        `,
+        [
+          weekKey,
+          userId,
+          payment.userName || null,
+          payment.paidAt || Date.now(),
+          payment.batchId || null,
+          JSON.stringify(payment.batchWeekKeys || [weekKey]),
+          payment.logMessageId || null,
+        ]
+      );
+
+      migratedPayments += 1;
+    }
+  }
+
+  for (const [weekKey, summary] of Object.entries(data.weeklySummaries || {})) {
+    await dbQuery(
+      `
+      INSERT INTO weekly_summaries
+        (week_key, posted_at, reason, paid_count, unpaid_count)
+      VALUES
+        ($1, $2, $3, $4, $5)
+      ON CONFLICT (week_key)
+      DO NOTHING;
+      `,
+      [
+        weekKey,
+        summary.postedAt || Date.now(),
+        summary.reason || "json-migration",
+        summary.paidCount || 0,
+        summary.unpaidCount || 0,
+      ]
+    );
+
+    migratedSummaries += 1;
+  }
+
+  await dbQuery(
+    `
+    INSERT INTO bot_meta (key, value, updated_at)
+    VALUES ($1, $2::jsonb, NOW())
+    ON CONFLICT (key)
+    DO UPDATE SET value = EXCLUDED.value, updated_at = NOW();
+    `,
+    [
+      "weekly_json_migrated",
+      JSON.stringify({
+        migratedAt: new Date().toISOString(),
+        migratedPayments,
+        migratedSummaries,
+      }),
+    ]
+  );
+
+  console.log(`✅ Wochenabgaben aus JSON in PostgreSQL geprüft/migriert: ${migratedPayments} Zahlungen, ${migratedSummaries} Übersichten.`);
+}
+
+async function getWeeklyPaymentDb(weekKey, userId) {
+  const result = await dbQuery(
+    `
+    SELECT *
+    FROM weekly_payments
+    WHERE week_key = $1
+      AND user_id = $2
+      AND removed = false
+    LIMIT 1;
+    `,
+    [weekKey, userId]
+  );
+
+  return result.rows[0] || null;
+}
+
+async function getWeeklyPaymentsForWeekDb(weekKey) {
+  const result = await dbQuery(
+    `
+    SELECT *
+    FROM weekly_payments
+    WHERE week_key = $1
+      AND removed = false
+    ORDER BY paid_at ASC;
+    `,
+    [weekKey]
+  );
+
+  const paidUsers = {};
+
+  for (const row of result.rows) {
+    paidUsers[row.user_id] = {
+      userId: row.user_id,
+      userName: row.user_name,
+      paidAt: Number(row.paid_at),
+      batchId: row.batch_id,
+      batchWeekKeys: row.batch_week_keys || [],
+      logMessageId: row.log_message_id,
+    };
+  }
+
+  return {
+    weekKey,
+    paidUsers,
+  };
+}
+
+async function saveWeeklyPaymentDb({ weekKey, userId, userName, paidAt, batchId, batchWeekKeys, logMessageId = null }) {
+  await dbQuery(
+    `
+    INSERT INTO weekly_payments
+      (week_key, user_id, user_name, paid_at, batch_id, batch_week_keys, log_message_id, removed, removed_at, removed_by, updated_at)
+    VALUES
+      ($1, $2, $3, $4, $5, $6::jsonb, $7, false, null, null, NOW())
+    ON CONFLICT (week_key, user_id)
+    DO UPDATE SET
+      user_name = EXCLUDED.user_name,
+      paid_at = EXCLUDED.paid_at,
+      batch_id = EXCLUDED.batch_id,
+      batch_week_keys = EXCLUDED.batch_week_keys,
+      log_message_id = EXCLUDED.log_message_id,
+      removed = false,
+      removed_at = null,
+      removed_by = null,
+      updated_at = NOW();
+    `,
+    [
+      weekKey,
+      userId,
+      userName,
+      paidAt,
+      batchId,
+      JSON.stringify(batchWeekKeys || [weekKey]),
+      logMessageId,
+    ]
+  );
+}
+
+async function updateWeeklyPaymentLogMessageDb({ userId, weekKeys, batchId, logMessageId }) {
+  if (!logMessageId || !weekKeys || weekKeys.length === 0) return;
+
+  await dbQuery(
+    `
+    UPDATE weekly_payments
+    SET log_message_id = $1,
+        batch_id = $2,
+        batch_week_keys = $3::jsonb,
+        updated_at = NOW()
+    WHERE user_id = $4
+      AND week_key = ANY($5::text[])
+      AND removed = false;
+    `,
+    [logMessageId, batchId, JSON.stringify(weekKeys), userId, weekKeys]
+  );
+}
+
+async function removeWeeklyPaymentDb({ identifier, userId, removedAt, removedBy }) {
+  const result = await dbQuery(
+    `
+    SELECT *
+    FROM weekly_payments
+    WHERE user_id = $1
+      AND removed = false
+      AND (batch_id = $2 OR week_key = $2)
+    ORDER BY paid_at ASC;
+    `,
+    [userId, identifier]
+  );
+
+  if (result.rows.length === 0) {
+    return {
+      removedWeeks: [],
+      paymentInfo: null,
+    };
+  }
+
+  const removedWeeks = result.rows.map((row) => row.week_key);
+  const first = result.rows[0];
+
+  await dbQuery(
+    `
+    UPDATE weekly_payments
+    SET removed = true,
+        removed_at = $1,
+        removed_by = $2,
+        updated_at = NOW()
+    WHERE user_id = $3
+      AND removed = false
+      AND week_key = ANY($4::text[]);
+    `,
+    [removedAt, removedBy, userId, removedWeeks]
+  );
+
+  return {
+    removedWeeks,
+    paymentInfo: {
+      userId: first.user_id,
+      userName: first.user_name,
+      paidAt: Number(first.paid_at),
+      batchId: first.batch_id,
+      batchWeekKeys: first.batch_week_keys || removedWeeks,
+      logMessageId: first.log_message_id,
+    },
+  };
+}
+
+async function hasWeeklySummaryDb(weekKey) {
+  const result = await dbQuery(
+    "SELECT week_key FROM weekly_summaries WHERE week_key = $1 LIMIT 1;",
+    [weekKey]
+  );
+
+  return result.rows.length > 0;
+}
+
+async function saveWeeklySummaryDb({ weekKey, postedAt, reason, paidCount, unpaidCount }) {
+  await dbQuery(
+    `
+    INSERT INTO weekly_summaries
+      (week_key, posted_at, reason, paid_count, unpaid_count)
+    VALUES
+      ($1, $2, $3, $4, $5)
+    ON CONFLICT (week_key)
+    DO UPDATE SET
+      posted_at = EXCLUDED.posted_at,
+      reason = EXCLUDED.reason,
+      paid_count = EXCLUDED.paid_count,
+      unpaid_count = EXCLUDED.unpaid_count;
+    `,
+    [weekKey, postedAt, reason, paidCount, unpaidCount]
+  );
+}
+
 async function getLatestMemberForWeeklyPayment(interaction) {
   const member = interaction.member;
   const freshMember = await interaction.guild.members.fetch(interaction.user.id).catch(() => member);
@@ -1981,7 +2232,6 @@ async function handleWeeklyPaymentSelection(interaction) {
   const weekCount = Math.min(Math.max(Number(interaction.values[0]) || 1, 1), 6);
   const selectedWeekKeys = getWeekKeysFromNow(weekCount);
 
-  const data = loadData();
   const userName = getReadableUserName(latestMember, interaction.user);
   const paidAt = Date.now();
   const batchId = createShortId();
@@ -1990,23 +2240,23 @@ async function handleWeeklyPaymentSelection(interaction) {
   const alreadyPaidWeeks = [];
 
   for (const weekKey of selectedWeekKeys) {
-    const weekData = ensureWeeklyPaymentData(data, weekKey);
+    const existingPayment = await getWeeklyPaymentDb(weekKey, interaction.user.id);
 
-    if (weekData.paidUsers[interaction.user.id]) {
+    if (existingPayment) {
       alreadyPaidWeeks.push(weekKey);
       continue;
     }
 
-    weekData.paidUsers[interaction.user.id] = {
+    await saveWeeklyPaymentDb({
+      weekKey,
       userId: interaction.user.id,
       userName,
       paidAt,
       batchId,
       batchWeekKeys: selectedWeekKeys,
       logMessageId: null,
-    };
+    });
 
-    data.weeklyPayments[weekKey] = weekData;
     newlySavedWeeks.push(weekKey);
   }
 
@@ -2016,8 +2266,6 @@ async function handleWeeklyPaymentSelection(interaction) {
       components: [],
     });
   }
-
-  saveData(data);
 
   const logMessage = await sendToChannel(CONFIG.weeklyPaymentChannelId, {
     embeds: [
@@ -2034,20 +2282,12 @@ async function handleWeeklyPaymentSelection(interaction) {
   });
 
   if (logMessage) {
-    const freshData = loadData();
-
-    for (const weekKey of newlySavedWeeks) {
-      const freshWeekData = ensureWeeklyPaymentData(freshData, weekKey);
-
-      if (freshWeekData.paidUsers[interaction.user.id]) {
-        freshWeekData.paidUsers[interaction.user.id].logMessageId = logMessage.id;
-        freshWeekData.paidUsers[interaction.user.id].batchId = batchId;
-        freshWeekData.paidUsers[interaction.user.id].batchWeekKeys = newlySavedWeeks;
-        freshData.weeklyPayments[weekKey] = freshWeekData;
-      }
-    }
-
-    saveData(freshData);
+    await updateWeeklyPaymentLogMessageDb({
+      userId: interaction.user.id,
+      weekKeys: newlySavedWeeks,
+      batchId,
+      logMessageId: logMessage.id,
+    });
   }
 
   let replyText = [
@@ -2075,31 +2315,16 @@ async function removeWeeklyPayment(interaction, identifier, userId) {
     });
   }
 
-  const data = loadData();
   const removedAt = Date.now();
   const removedBy = interaction.user.id;
   const removedByName = getReadableUserName(interaction.member, interaction.user);
 
-  const removedWeeks = [];
-  let paymentInfo = null;
-
-  // Neue Logik: identifier ist meistens batchId.
-  for (const [weekKey, weekData] of Object.entries(data.weeklyPayments || {})) {
-    const payment = weekData.paidUsers?.[userId];
-
-    if (!payment) continue;
-
-    const matchesBatch = payment.batchId && payment.batchId === identifier;
-    const matchesLegacySingle = weekKey === identifier;
-
-    if (!matchesBatch && !matchesLegacySingle) continue;
-
-    if (!paymentInfo) paymentInfo = payment;
-
-    delete weekData.paidUsers[userId];
-    data.weeklyPayments[weekKey] = weekData;
-    removedWeeks.push(weekKey);
-  }
+  const { removedWeeks, paymentInfo } = await removeWeeklyPaymentDb({
+    identifier,
+    userId,
+    removedAt,
+    removedBy,
+  });
 
   if (removedWeeks.length === 0 || !paymentInfo) {
     return interaction.reply({
@@ -2107,8 +2332,6 @@ async function removeWeeklyPayment(interaction, identifier, userId) {
       ephemeral: true,
     });
   }
-
-  saveData(data);
 
   await interaction.message.edit({
     embeds: [
@@ -2191,8 +2414,7 @@ async function postWeeklyPaymentOverview(reason = "scheduled") {
   }
 
   const weekKey = getWeekKey();
-  const data = loadData();
-  const weekData = ensureWeeklyPaymentData(data, weekKey);
+  const weekData = await getWeeklyPaymentsForWeekDb(weekKey);
 
   const payers = await getPayerMembers(guild);
   const paidIds = Object.keys(weekData.paidUsers || {});
@@ -2241,16 +2463,13 @@ async function postWeeklyPaymentOverview(reason = "scheduled") {
     embeds: [overviewEmbed],
   });
 
-  if (!data.weeklySummaries) data.weeklySummaries = {};
-
-  data.weeklySummaries[weekKey] = {
+  await saveWeeklySummaryDb({
+    weekKey,
     postedAt: Date.now(),
     reason,
     paidCount: paidMembers.length,
     unpaidCount: unpaidMembers.length,
-  };
-
-  saveData(data);
+  });
 
   console.log(`✅ Wochenabgabe-Übersicht für ${weekKey} wurde gepostet.`);
 }
@@ -2264,12 +2483,12 @@ async function checkWeeklyPaymentSummary() {
   if (now.weekday !== "Sonntag") return;
   if (Number(now.hour) < 20) return;
 
-  const data = loadData();
-
-  if (data.weeklySummaries?.[weekKey]) return;
+  const alreadyPosted = await hasWeeklySummaryDb(weekKey);
+  if (alreadyPosted) return;
 
   await postWeeklyPaymentOverview("Sonntag 20:00 Uhr");
 }
+
 
 
 // =====================================================
@@ -2790,6 +3009,7 @@ client.once("clientReady", async () => {
 
   try {
     await initDatabase();
+    await migrateWeeklyPaymentsFromJsonToDatabase();
   } catch (error) {
     console.error("❌ Datenbank konnte nicht vorbereitet werden:", error);
   }
