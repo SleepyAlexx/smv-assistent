@@ -2436,16 +2436,6 @@ async function getPayerMembers(guild) {
 function formatMemberListForOverview(membersOrIds, paidUsers = null) {
   if (!membersOrIds || membersOrIds.length === 0) return "—";
 
-  if (paidUsers) {
-    return membersOrIds
-      .map((member) => {
-        const paidAt = paidUsers[member.id]?.paidAt;
-        const name = member.displayName || member.user.username;
-        return `╰ ${name}${paidAt ? ` — ${formatGermanDateTimeFromMs(paidAt)}` : ""}`;
-      })
-      .join("\n");
-  }
-
   return membersOrIds
     .map((member) => {
       const name = member.displayName || member.user.username;
@@ -2453,6 +2443,7 @@ function formatMemberListForOverview(membersOrIds, paidUsers = null) {
     })
     .join("\n");
 }
+
 
 function splitLinesForDiscordFields(text, maxLength = 1000) {
   const lines = String(text || "—").split("\n");
@@ -2617,13 +2608,10 @@ async function postWeeklyPaymentOverview(reason = "scheduled") {
     .setTitle("💸 WOCHENABGABE ÜBERSICHT")
     .setDescription(
       [
-        "**Event Info:**",
         `📅 **Woche:** ${weekKey}`,
         `🕘 **Stand:** ${formatGermanDateTimeFromMs(Date.now())}`,
-        `📝 **Grund:** ${reason}`,
         "",
         "**Info:**",
-        `Status: **Übersicht erstellt**`,
         `Bezahlt: **${paidMembers.length}**`,
         `Nicht bezahlt: **${unpaidMembers.length}**`,
         `Zahlungspflichtig: **${payers.length}**`,
