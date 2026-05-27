@@ -2440,15 +2440,32 @@ function formatMemberListForOverview(membersOrIds, paidUsers = null) {
     return membersOrIds
       .map((member) => {
         const paidAt = paidUsers[member.id]?.paidAt;
-        return `✅ ${member.displayName || member.user.username} (<@${member.id}>)${paidAt ? ` — ${formatGermanDateTimeFromMs(paidAt)}` : ""}`;
+        const name = member.displayName || member.user.username;
+        return `╰ ${name} (<@${member.id}>)${paidAt ? ` — ${formatGermanDateTimeFromMs(paidAt)}` : ""}`;
       })
       .join("\n");
   }
 
   return membersOrIds
-    .map((member) => `❌ ${member.displayName || member.user.username} (<@${member.id}>)`)
+    .map((member) => {
+      const name = member.displayName || member.user.username;
+      return `╰ ${name} (<@${member.id}>)`;
+    })
     .join("\n");
 }
+
+function addOverviewListFields(embed, title, text, firstFieldName) {
+  const chunks = chunkText(text, 1000);
+
+  chunks.forEach((chunk, index) => {
+    embed.addFields({
+      name: index === 0 ? firstFieldName : "\u200B",
+      value: chunk,
+      inline: false,
+    });
+  });
+}
+
 
 async function manuallyAddWeeklyPayment(interaction) {
   if (!hasLeaderPermission(interaction.member)) {
@@ -2565,37 +2582,33 @@ async function postWeeklyPaymentOverview(reason = "scheduled") {
     .setTitle("💸 WOCHENABGABE ÜBERSICHT")
     .setDescription(
       [
-        "━━━━━━━━━━━━━━━━━━━━",
-        `**Woche:** ${weekKey}`,
-        `**Stand:** ${formatGermanDateTimeFromMs(Date.now())}`,
-        `**Grund:** ${reason}`,
+        "**Event Info:**",
+        `📅 **Woche:** ${weekKey}`,
+        `🕘 **Stand:** ${formatGermanDateTimeFromMs(Date.now())}`,
+        `📝 **Grund:** ${reason}`,
         "",
-        `✅ Bezahlt: **${paidMembers.length}**`,
-        `❌ Nicht bezahlt: **${unpaidMembers.length}**`,
-        `👥 Zahlungspflichtig: **${payers.length}**`,
-        "━━━━━━━━━━━━━━━━━━━━",
+        "**Info:**",
+        `Status: **Übersicht erstellt**`,
+        `Bezahlt: **${paidMembers.length}**`,
+        `Nicht bezahlt: **${unpaidMembers.length}**`,
+        `Zahlungspflichtig: **${payers.length}**`,
       ].join("\n")
     )
-    .setFooter({ text: `${CONFIG.shortName} • Wochenabgabe` });
+    .setFooter({ text: `${CONFIG.shortName} • Wochenabgabe • ${weekKey}` });
 
-  const paidTextChunks = chunkText(formatMemberListForOverview(paidMembers, weekData.paidUsers), 1000);
-  const unpaidTextChunks = chunkText(formatMemberListForOverview(unpaidMembers), 1000);
+  addOverviewListFields(
+    overviewEmbed,
+    "paid",
+    formatMemberListForOverview(paidMembers, weekData.paidUsers),
+    `✅ Bezahlt (${paidMembers.length})`
+  );
 
-  paidTextChunks.forEach((chunk, index) => {
-    overviewEmbed.addFields({
-      name: index === 0 ? "✅ Bezahlt" : `✅ Bezahlt (${index + 1})`,
-      value: chunk,
-      inline: false,
-    });
-  });
-
-  unpaidTextChunks.forEach((chunk, index) => {
-    overviewEmbed.addFields({
-      name: index === 0 ? "❌ Nicht bezahlt" : `❌ Nicht bezahlt (${index + 1})`,
-      value: chunk,
-      inline: false,
-    });
-  });
+  addOverviewListFields(
+    overviewEmbed,
+    "unpaid",
+    formatMemberListForOverview(unpaidMembers),
+    `❌ Nicht bezahlt (${unpaidMembers.length})`
+  );
 
   await sendToChannel(CONFIG.weeklyPaymentChannelId, {
     embeds: [overviewEmbed],
@@ -2611,6 +2624,7 @@ async function postWeeklyPaymentOverview(reason = "scheduled") {
 
   console.log(`✅ Wochenabgabe-Übersicht für ${weekKey} wurde gepostet.`);
 }
+
 
 async function checkWeeklyPaymentSummary() {
   const now = getBerlinParts();
