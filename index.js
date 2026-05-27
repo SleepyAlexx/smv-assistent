@@ -208,6 +208,12 @@ const SANCTION_MAP = new Map(SANCTIONS.map((s) => [s.id, s]));
 // Zwischenspeicher für Leader, die gerade eine Sanktion erstellen
 const sanctionDrafts = new Map();
 
+// Cache für Wochenabgabe-Übersicht, damit Discord nicht bei jeder Übersicht alle Mitglieder neu laden muss.
+let payerMembersCache = {
+  fetchedAt: 0,
+  members: [],
+};
+
 // =====================================================
 // DATENBANK-GRUNDLAGE
 // =====================================================
@@ -2381,11 +2387,50 @@ async function removeWeeklyPayment(interaction, identifier, userId) {
 
 
 async function getPayerMembers(guild) {
-  const members = await guild.members.fetch();
+  const cacheAgeMs = Date.now() - payerMembersCache.fetchedAt;
 
-  return [...members.values()]
+  // Wenn wir gerade erst geprüft haben, nutzen wir den Cache.
+  if (payerMembersCache.members.length > 0 && cacheAgeMs < 10 * 60 * 1000) {
+    return payerMembersCache.members;
+  }
+
+  // Wichtig:
+  // Nicht jedes Mal guild.members.fetch() ausführen.
+  // Das löst bei Discord schnell Gateway Rate Limits aus.
+  let cachedMembers = [...guild.members.cache.values()]
     .filter((member) => !member.user.bot)
     .filter((member) => member.roles.cache.has(CONFIG.payerRoleId));
+
+  if (cachedMembers.length > 0) {
+    payerMembersCache = {
+      fetchedAt: Date.now(),
+      members: cachedMembers,
+    };
+
+    return cachedMembers;
+  }
+
+  // Nur wenn der Cache leer ist, versuchen wir einmal alle Mitglieder zu laden.
+  // Falls Discord rate-limited, brechen wir sauber ab statt den Bot zu stressen.
+  try {
+    const fetchedMembers = await guild.members.fetch();
+
+    const payers = [...fetchedMembers.values()]
+      .filter((member) => !member.user.bot)
+      .filter((member) => member.roles.cache.has(CONFIG.payerRoleId));
+
+    payerMembersCache = {
+      fetchedAt: Date.now(),
+      members: payers,
+    };
+
+    return payers;
+  } catch (error) {
+    console.error("❌ Mitglieder konnten für Wochenabgabe nicht geladen werden:", error);
+
+    // Fallback: lieber leere Liste zurückgeben als den Bot crashen.
+    return [];
+  }
 }
 
 function formatMemberListForOverview(membersOrIds, paidUsers = null) {
@@ -2505,6 +2550,11 @@ async function postWeeklyPaymentOverview(reason = "scheduled") {
   const weekData = await getWeeklyPaymentsForWeekDb(weekKey);
 
   const payers = await getPayerMembers(guild);
+
+  if (payers.length === 0) {
+    console.warn("⚠️ Keine Zahlungspflichtigen gefunden. Prüfe Member-Intent, Rollen-ID oder Discord-Cache.");
+  }
+
   const paidIds = Object.keys(weekData.paidUsers || {});
 
   const paidMembers = payers.filter((member) => paidIds.includes(member.id));
