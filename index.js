@@ -731,15 +731,13 @@ function createLineupEmbed(lineup) {
         "**Event Info:**",
         `📅 **Datum:** ${lineup.dateText}`,
         `🕘 **Beginn:** ${getLineupStartText(lineup)}`,
-        `👥 **Rückmeldungen:** ${total}`,
         "",
-        "**Description:**",
+        "**Deskription:**",
         "✅ Ihr schafft es pünktlich zur Aufstellung zu kommen.",
         "❌ Ihr schafft es nicht zur Aufstellung zu kommen.",
         "⏳ Ihr schafft es in der angegebenen Zeit zur Aufstellung.",
         "",
         `**Status:** ${statusText}`,
-        `**System:** ${CONFIG.shortName} • Aufstellung`,
       ].join("\n")
     )
     .addFields(
@@ -760,11 +758,7 @@ function createLineupEmbed(lineup) {
       },
       {
         name: "Info",
-        value: [
-          `Sign ups: Total: **${total}**`,
-          `Event start time: **${getLineupStartText(lineup)}**`,
-          `Status: **${statusText}**`,
-        ].join("\n"),
+        value: `Anmeldungen: **${total}**`,
         inline: false,
       }
     )
