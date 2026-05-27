@@ -736,8 +736,6 @@ function createLineupEmbed(lineup) {
         "✅ Ihr schafft es pünktlich zur Aufstellung zu kommen.",
         "❌ Ihr schafft es nicht zur Aufstellung zu kommen.",
         "⏳ Ihr schafft es in der angegebenen Zeit zur Aufstellung.",
-        "",
-        `**Status:** ${statusText}`,
       ].join("\n")
     )
     .addFields(
@@ -758,7 +756,10 @@ function createLineupEmbed(lineup) {
       },
       {
         name: "Info",
-        value: `Anmeldungen: **${total}**`,
+        value: [
+          `Status: **${statusText}**`,
+          `Anmeldungen: **${total}**`,
+        ].join("\n"),
         inline: false,
       }
     )
