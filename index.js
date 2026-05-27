@@ -19,7 +19,7 @@
 // UPDATE: Leader-Logs wurden schöner formatiert.
 // UPDATE: Überschrift ist jetzt 🚫 SANKTION 🚫.
 // UPDATE: Fußball-Events sind jetzt im Familienpanel eingebaut und aus dem Leaderpanel entfernt.
-// UPDATE: Aufstellungen und Fußball-Events markieren jetzt @everyone.
+// UPDATE: Aufstellungen markieren jetzt die SMV-Rolle; Fußball-Events markieren weiterhin @everyone.
 // UPDATE: Fußball-Event-Formular wurde schöner benannt.
 // UPDATE: ❌-Buttons bei Aufstellung und Fußball sind jetzt grau statt rot.
 // UPDATE: Familienpanel mit Abmeldung eingebaut.
@@ -107,6 +107,7 @@ const CONFIG = {
 
   // Wochenabgabe / Zahlende/r Rollenautomatik
   familyMemberRoleId: "1451314176004984912",
+  lineupMentionRoleId: "1451314176004984912",
   payerRoleId: "1508303859385372812",
 
   // Wochenabgabe-Log und Übersicht
@@ -869,7 +870,7 @@ async function updateLineupMessage(lineup) {
 async function announceLineupCancelled(lineup, leaderId) {
   await sendToChannel(CONFIG.lineupChannelId, {
     content: [
-      "@everyone",
+      `<@&${CONFIG.lineupMentionRoleId}>`,
       "",
       "🐻 **SMV AUFSTELLUNG ABGESAGT**",
       "",
@@ -886,7 +887,7 @@ async function announceLineupCancelled(lineup, leaderId) {
 async function announceLineupTimeChanged(lineup, oldTime, newTime, leaderId) {
   await sendToChannel(CONFIG.lineupChannelId, {
     content: [
-      "@everyone",
+      `<@&${CONFIG.lineupMentionRoleId}>`,
       "",
       "🕘 **AUFSTELLUNGSUHRZEIT GEÄNDERT**",
       "",
@@ -939,7 +940,7 @@ async function cancelLineup(interaction, dateKey) {
   await announceLineupCancelled(lineup, interaction.user.id);
 
   return interaction.reply({
-    content: "✅ Aufstellung wurde abgesagt und @everyone wurde informiert.",
+    content: "✅ Aufstellung wurde abgesagt und die SMV-Rolle wurde informiert.",
     ephemeral: true,
   });
 }
@@ -979,7 +980,7 @@ async function changeLineupTime(interaction, dateKey) {
   await announceLineupTimeChanged(lineup, oldTime, newTime, interaction.user.id);
 
   return interaction.reply({
-    content: `✅ Aufstellungsuhrzeit wurde von **${oldTime}** auf **${newTime}** geändert und @everyone wurde informiert.`,
+    content: `✅ Aufstellungsuhrzeit wurde von **${oldTime}** auf **${newTime}** geändert und die SMV-Rolle wurde informiert.`,
     ephemeral: true,
   });
 }
@@ -1002,10 +1003,10 @@ async function createLineupForToday(reason = "scheduled") {
   const lineup = createEmptyLineup(now.dateKey, now.dateText, now.weekday);
 
   const message = await sendToChannel(CONFIG.lineupChannelId, {
-    content: "@everyone",
+    content: `<@&${CONFIG.lineupMentionRoleId}>`,
     embeds: [createLineupEmbed(lineup)],
     components: createLineupButtons(lineup),
-    allowedMentions: { parse: ["everyone"] },
+    allowedMentions: { roles: [CONFIG.lineupMentionRoleId] },
   });
 
   if (!message) {
@@ -2328,7 +2329,7 @@ async function createAndPostFootballEvent(interaction) {
     content: "@everyone",
     embeds: [createFootballEventEmbed(event)],
     components: [createFootballEventButtons(event)],
-    allowedMentions: { parse: ["everyone"] },
+    allowedMentions: { roles: [CONFIG.lineupMentionRoleId] },
   });
 
   if (!message) {
