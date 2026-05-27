@@ -724,26 +724,48 @@ function createLineupEmbed(lineup) {
 
   return new EmbedBuilder()
     .setColor(lineup.cancelled ? CONFIG.dangerColor : statusText === "Anmeldung geschlossen" ? CONFIG.warningColor : CONFIG.embedColor)
+    .setTitle(lineup.title || getLineupTitle(lineup.weekday))
     .setDescription(
       [
-        getLineupHeadline(lineup),
-        "",
+        "**Event Info:**",
         `📅 **Datum:** ${lineup.dateText}`,
         `🕘 **Beginn:** ${getLineupStartText(lineup)}`,
         `👥 **Rückmeldungen:** ${total}`,
         "",
-        `✅ **ANWESEND — ${presentUsers.length}**`,
-        formatLineupUserList(presentUsers),
-        "",
-        `❌ **ABWESEND — ${absentUsers.length}**`,
-        formatLineupUserList(absentUsers),
-        "",
-        `⏳ **UNGEWISS — ${unsureUsers.length}**`,
-        formatLineupUserList(unsureUsers),
+        "**Description:**",
+        "✅ Ihr schafft es pünktlich zur Aufstellung zu kommen.",
+        "❌ Ihr schafft es nicht zur Aufstellung zu kommen.",
+        "⏳ Ihr schafft es in der angegebenen Zeit zur Aufstellung.",
         "",
         `**Status:** ${statusText}`,
         `**System:** ${CONFIG.shortName} • Aufstellung`,
       ].join("\n")
+    )
+    .addFields(
+      {
+        name: `✅ Anwesend (${presentUsers.length})`,
+        value: formatLineupUserList(presentUsers),
+        inline: true,
+      },
+      {
+        name: `❌ Abwesend (${absentUsers.length})`,
+        value: formatLineupUserList(absentUsers),
+        inline: true,
+      },
+      {
+        name: `⏳ Ungewiss (${unsureUsers.length})`,
+        value: formatLineupUserList(unsureUsers),
+        inline: true,
+      },
+      {
+        name: "Info",
+        value: [
+          `Sign ups: Total: **${total}**`,
+          `Event start time: **${getLineupStartText(lineup)}**`,
+          `Status: **${statusText}**`,
+        ].join("\n"),
+        inline: false,
+      }
     )
     .setFooter({
       text: `${CONFIG.shortName} • Aufstellung • ${lineup.dateText}`,
