@@ -1,3 +1,4 @@
+// UPDATE: Fußball-Event jetzt mit 2-Spalten-Design und Button zum Wiederöffnen nach versehentlicher Absage.
 // UPDATE: Aufstellung jetzt mit 2-Spalten-Design und Button zum Wiederöffnen nach versehentlicher Absage.
 // =====================================================
 // SMV-Assistent | Komplettscript
@@ -2893,7 +2894,7 @@ function createFootballEventEmbed(event) {
       {
         name: `⏳ Ungewiss (${unsureUsers.length})`,
         value: formatFootballUserList(unsureUsers),
-        inline: true,
+        inline: false,
       },
       {
         name: "Info",
@@ -2948,6 +2949,13 @@ function createFootballEventButtons(event) {
       .setDisabled(Boolean(event.cancelled)),
 
     new ButtonBuilder()
+      .setCustomId(`football_reopen_${event.id}`)
+      .setLabel("Fußball wieder öffnen")
+      .setEmoji("🔓")
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(!event.cancelled),
+
+    new ButtonBuilder()
       .setCustomId(`football_time_${event.id}`)
       .setLabel("Uhrzeit ändern")
       .setEmoji("🕘")
@@ -2991,6 +2999,25 @@ async function announceFootballCancelled(event, leaderId) {
       `📅 **Datum:** ${event.dateText}`,
       `🕘 **Ursprüngliche Uhrzeit:** ${event.timeText}`,
       `👑 **Abgesagt von:** <@${leaderId}>`,
+    ].join("\n"),
+    allowedMentions: { roles: [CONFIG.lineupMentionRoleId], users: [leaderId] },
+  });
+}
+
+async function announceFootballReopened(event, leaderId) {
+  await sendToChannel(CONFIG.footballEventChannelId, {
+    content: [
+      `<@&${CONFIG.lineupMentionRoleId}>`,
+      "",
+      "🔓 **FUẞBALL-EVENT WIEDER GEÖFFNET**",
+      "",
+      "Das heutige Fußball-Event wurde wieder geöffnet.",
+      "",
+      `📅 **Datum:** ${event.dateText}`,
+      `🕘 **Beginn:** ${event.timeText}`,
+      `👑 **Geöffnet von:** <@${leaderId}>`,
+      "",
+      "Ihr könnt euch jetzt wieder anmelden.",
     ].join("\n"),
     allowedMentions: { roles: [CONFIG.lineupMentionRoleId], users: [leaderId] },
   });
@@ -3052,6 +3079,49 @@ async function cancelFootballEvent(interaction, eventId) {
 
   return interaction.reply({
     content: "✅ Fußball-Event wurde abgesagt und die SMV-Rolle wurde informiert.",
+    ephemeral: true,
+  });
+}
+
+async function reopenFootballEvent(interaction, eventId) {
+  if (!hasFootballCreatorPermission(interaction.member)) {
+    return interaction.reply({
+      content: "❌ Du hast keine Berechtigung, Fußball-Events wieder zu öffnen.",
+      ephemeral: true,
+    });
+  }
+
+  const data = loadData();
+  const event = data.footballEvents[eventId];
+
+  if (!event) {
+    return interaction.reply({
+      content: "❌ Dieses Fußball-Event wurde nicht im Speicher gefunden.",
+      ephemeral: true,
+    });
+  }
+
+  if (!event.cancelled) {
+    return interaction.reply({
+      content: "ℹ️ Dieses Fußball-Event ist bereits geöffnet.",
+      ephemeral: true,
+    });
+  }
+
+  event.cancelled = false;
+  event.cancelledBy = null;
+  event.cancelledAt = null;
+  event.reopenedBy = interaction.user.id;
+  event.reopenedAt = Date.now();
+
+  data.footballEvents[eventId] = event;
+  saveData(data);
+
+  await updateFootballEventMessage(event);
+  await announceFootballReopened(event, interaction.user.id);
+
+  return interaction.reply({
+    content: "✅ Fußball-Event wurde wieder geöffnet und die SMV-Rolle wurde informiert.",
     ephemeral: true,
   });
 }
@@ -3668,6 +3738,10 @@ client.on("interactionCreate", async (interaction) => {
 
       if (action === "cancel") {
         return cancelFootballEvent(interaction, eventId);
+      }
+
+      if (action === "reopen") {
+        return reopenFootballEvent(interaction, eventId);
       }
 
       if (action === "time") {
