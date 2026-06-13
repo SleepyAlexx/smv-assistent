@@ -1,3 +1,4 @@
+// UPDATE: Aufstellung jetzt mit 2-Spalten-Design und Button zum Wiederöffnen nach versehentlicher Absage.
 // =====================================================
 // SMV-Assistent | Komplettscript
 // Registrierung + Join/Leave + Aufstellung + Leaderpanel/Sanktionen + Fußball-Events + Familienpanel + Wochenabgabe
@@ -863,7 +864,7 @@ function createLineupEmbed(lineup) {
       {
         name: `⏳ Ungewiss (${unsureUsers.length})`,
         value: formatLineupUserList(unsureUsers),
-        inline: true,
+        inline: false,
       },
       {
         name: "Info",
@@ -911,10 +912,17 @@ function createLineupButtons(lineup) {
   const managementRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`lineup_cancel_${lineup.dateKey}`)
-      .setLabel("Aufstellung abgesagt")
+      .setLabel("Aufstellung absagen")
       .setEmoji("🛑")
       .setStyle(ButtonStyle.Danger)
       .setDisabled(Boolean(lineup.cancelled)),
+
+    new ButtonBuilder()
+      .setCustomId(`lineup_reopen_${lineup.dateKey}`)
+      .setLabel("Aufstellung wieder öffnen")
+      .setEmoji("🔓")
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(!lineup.cancelled),
 
     new ButtonBuilder()
       .setCustomId(`lineup_time_${lineup.dateKey}`)
@@ -990,6 +998,25 @@ async function announceLineupCancelled(lineup, leaderId) {
   });
 }
 
+async function announceLineupReopened(lineup, leaderId) {
+  await sendToChannel(CONFIG.lineupChannelId, {
+    content: [
+      `<@&${CONFIG.lineupMentionRoleId}>`,
+      "",
+      "🔓 **SMV AUFSTELLUNG WIEDER GEÖFFNET**",
+      "",
+      "Die heutige Aufstellung wurde wieder geöffnet.",
+      "",
+      `📅 **Datum:** ${lineup.dateText}`,
+      `🕘 **Beginn:** ${getLineupStartText(lineup)}`,
+      `👑 **Geöffnet von:** <@${leaderId}>`,
+      "",
+      "Ihr könnt euch jetzt wieder anmelden.",
+    ].join("\n"),
+    allowedMentions: { roles: [CONFIG.lineupMentionRoleId], users: [leaderId] },
+  });
+}
+
 async function announceLineupTimeChanged(lineup, oldTime, newTime, leaderId) {
   await sendToChannel(CONFIG.lineupChannelId, {
     content: [
@@ -1047,6 +1074,50 @@ async function cancelLineup(interaction, dateKey) {
 
   return interaction.reply({
     content: "✅ Aufstellung wurde abgesagt und die SMV-Rolle wurde informiert.",
+    ephemeral: true,
+  });
+}
+
+async function reopenLineup(interaction, dateKey) {
+  if (!hasLeaderPermission(interaction.member)) {
+    return interaction.reply({
+      content: "❌ Du hast keine Berechtigung, die Aufstellung wieder zu öffnen.",
+      ephemeral: true,
+    });
+  }
+
+  const data = loadData();
+  const lineup = data.lineups[dateKey];
+
+  if (!lineup) {
+    return interaction.reply({
+      content: "❌ Diese Aufstellung wurde nicht im Speicher gefunden.",
+      ephemeral: true,
+    });
+  }
+
+  if (!lineup.cancelled) {
+    return interaction.reply({
+      content: "ℹ️ Diese Aufstellung ist bereits geöffnet.",
+      ephemeral: true,
+    });
+  }
+
+  lineup.cancelled = false;
+  lineup.cancelledBy = null;
+  lineup.cancelledAt = null;
+  lineup.closed = false;
+  lineup.reopenedBy = interaction.user.id;
+  lineup.reopenedAt = Date.now();
+
+  data.lineups[dateKey] = lineup;
+  saveData(data);
+
+  await updateLineupMessage(lineup);
+  await announceLineupReopened(lineup, interaction.user.id);
+
+  return interaction.reply({
+    content: "✅ Aufstellung wurde wieder geöffnet und die SMV-Rolle wurde informiert.",
     ephemeral: true,
   });
 }
@@ -3490,6 +3561,11 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.isButton() && interaction.customId.startsWith("lineup_cancel_")) {
       const dateKey = interaction.customId.replace("lineup_cancel_", "");
       return cancelLineup(interaction, dateKey);
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith("lineup_reopen_")) {
+      const dateKey = interaction.customId.replace("lineup_reopen_", "");
+      return reopenLineup(interaction, dateKey);
     }
 
     if (interaction.isButton() && interaction.customId.startsWith("lineup_time_")) {
