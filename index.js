@@ -1,3 +1,4 @@
+// UPDATE: Bot-Status auf Made by Kquwi☦︎ gesetzt.
 // UPDATE: Fußball-Event jetzt mit 2-Spalten-Design und Button zum Wiederöffnen nach versehentlicher Absage.
 // UPDATE: Aufstellung jetzt mit 2-Spalten-Design und Button zum Wiederöffnen nach versehentlicher Absage.
 // =====================================================
@@ -55,6 +56,7 @@ const { Pool } = require("pg");
 const {
   Client,
   GatewayIntentBits,
+  ActivityType,
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
@@ -3336,6 +3338,16 @@ async function registerCommands() {
 
 client.once("clientReady", async () => {
   console.log(`✅ ${CONFIG.botName} ist online als ${client.user.tag}`);
+
+  client.user.setPresence({
+    status: "online",
+    activities: [
+      {
+        name: "Made by Kquwi☦︎",
+        type: ActivityType.Playing,
+      },
+    ],
+  });
 
   try {
     await initDatabase();
