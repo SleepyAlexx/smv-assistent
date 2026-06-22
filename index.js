@@ -1,3 +1,4 @@
+// FIX: Fehler bei /aufstellung-test und /aufstellung-erzwingen behoben: alte unsureUsers-Referenz in Aufstellung entfernt.
 // FIX: Manueller Slash-Command /aufstellung-erzwingen eingebaut, der die heutige Aufstellung wirklich neu postet.
 // FIX: Aufstellungsprüfung erstellt neu, wenn postedDates für heute existiert, aber die Discord-Nachricht fehlt.
 // UPDATE: Ungewiss bei Aufstellungen komplett entfernt; nur noch Anwesend oder Abwesend.
@@ -837,7 +838,7 @@ function formatLineupUserList(users) {
 function createLineupEmbed(lineup) {
   const presentUsers = getUsersByStatus(lineup, "present");
   const absentUsers = getUsersByStatus(lineup, "absent");
-  const total = presentUsers.length + absentUsers.length + unsureUsers.length;
+  const total = presentUsers.length + absentUsers.length;
   const statusText = getLineupStatus(lineup);
 
   return new EmbedBuilder()
@@ -3865,6 +3866,7 @@ client.on("interactionCreate", async (interaction) => {
       const statusMap = {
         present: "present",
         absent: "absent",
+        unsure: "unsure",
       };
 
       const selectedStatus = statusMap[action];
@@ -4122,7 +4124,12 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
   } catch (error) {
-    console.error("❌ Fehler bei einer Interaction:", error);
+    console.error("❌ Fehler bei einer Interaction:", {
+      name: error?.name,
+      message: error?.message,
+      code: error?.code,
+      stack: error?.stack,
+    });
 
     const errorMessage =
       "❌ Es ist ein Fehler passiert. Prüfe bitte die Bot-Rechte, Rollen-Reihenfolge und Railway-Logs.";
