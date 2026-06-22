@@ -1,4 +1,4 @@
-// TEMP: Einmalige manuelle Tagesaufstellung beim Bot-Start erzwingen. Danach wieder entfernen.
+// FIX: Manueller Slash-Command /aufstellung-erzwingen eingebaut, der die heutige Aufstellung wirklich neu postet.
 // FIX: Aufstellungsprüfung erstellt neu, wenn postedDates für heute existiert, aber die Discord-Nachricht fehlt.
 // UPDATE: Ungewiss bei Aufstellungen komplett entfernt; nur noch Anwesend oder Abwesend.
 // UPDATE: Bot-Status auf Made by Kquwi☦︎ gesetzt.
@@ -1193,28 +1193,65 @@ async function findLineupMessageById(messageId) {
   return channel.messages.fetch(messageId).catch(() => null);
 }
 
-async function forceCreateLineupForTodayOnce() {
+async function forcePostLineupForToday(reason = "manual-force") {
   const now = getBerlinParts();
 
   if (!isLineupDay(now.weekday)) {
-    console.log(`ℹ️ Heute ist ${now.weekday}. Keine manuelle Aufstellung nötig.`);
-    return;
+    console.log(`ℹ️ Heute ist ${now.weekday}. Keine Aufstellung.`);
+    return {
+      ok: false,
+      message: `Heute ist **${now.weekday}**. Heute ist kein Aufstellungstag.`,
+    };
   }
 
   const data = loadData();
 
-  if (data.postedDates?.[now.dateKey]) {
-    delete data.postedDates[now.dateKey];
+  const lineup =
+    data.lineups?.[now.dateKey] ||
+    createEmptyLineup(now.dateKey, now.dateText, now.weekday, client.user.id);
+
+  lineup.dateKey = now.dateKey;
+  lineup.dateText = now.dateText;
+  lineup.weekday = now.weekday;
+  lineup.title = getLineupTitle(now.weekday);
+  lineup.closed = false;
+  lineup.cancelled = false;
+  lineup.cancelledBy = null;
+  lineup.cancelledAt = null;
+  lineup.messageId = null;
+
+  const message = await sendToChannel(CONFIG.lineupChannelId, {
+    content: `<@&${CONFIG.lineupMentionRoleId}>`,
+    embeds: [createLineupEmbed(lineup)],
+    components: createLineupButtons(lineup),
+    allowedMentions: { roles: [CONFIG.lineupMentionRoleId] },
+  });
+
+  if (!message) {
+    console.error("❌ Aufstellung konnte nicht manuell erzwungen werden.");
+    return {
+      ok: false,
+      message: "Die Aufstellung konnte nicht gesendet werden. Bitte prüfe Channel-ID und Bot-Rechte.",
+    };
   }
 
-  if (data.lineups?.[now.dateKey]) {
-    delete data.lineups[now.dateKey];
-  }
+  lineup.messageId = message.id;
 
+  data.postedDates[now.dateKey] = {
+    messageId: message.id,
+    createdAt: new Date().toISOString(),
+    reason,
+  };
+
+  data.lineups[now.dateKey] = lineup;
   saveData(data);
 
-  console.log(`⚠️ Manuelle Aufstellung für ${now.dateKey} wird beim Start erzwungen.`);
-  await createLineupForToday("manual-forced-today");
+  console.log(`✅ ${lineup.title} für ${now.dateText} wurde manuell erzwungen. Grund: ${reason}`);
+
+  return {
+    ok: true,
+    message: `${lineup.title} für **${now.dateText}** wurde neu gepostet.`,
+  };
 }
 
 async function createLineupForToday(reason = "scheduled") {
@@ -3311,6 +3348,12 @@ async function registerCommands() {
       .toJSON(),
 
     new SlashCommandBuilder()
+      .setName("aufstellung-erzwingen")
+      .setDescription("Postet die heutige Aufstellung sofort neu, auch wenn intern schon etwas gespeichert ist")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .toJSON(),
+
+    new SlashCommandBuilder()
       .setName("leaderpanel")
       .setDescription("Sendet das SMV Leaderpanel")
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
@@ -3394,8 +3437,6 @@ client.once("clientReady", async () => {
   } catch (error) {
     console.error("❌ Fehler beim Registrieren der Slash Commands:", error);
   }
-
-  await forceCreateLineupForTodayOnce();
 
   await syncAllPayerRoles("Bot-Start - automatische Zahlende/r Prüfung");
 
@@ -3483,6 +3524,27 @@ client.on("interactionCreate", async (interaction) => {
 
       await createLineupForToday("manual-test");
       return;
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === "aufstellung-erzwingen") {
+      if (!hasLeaderPermission(interaction.member)) {
+        return interaction.reply({
+          content: "❌ Du hast keine Berechtigung, die Aufstellung zu erzwingen.",
+          ephemeral: true,
+        });
+      }
+
+      await interaction.reply({
+        content: "⏳ Ich poste die heutige Aufstellung jetzt neu.",
+        ephemeral: true,
+      });
+
+      const result = await forcePostLineupForToday(`Manuell erzwungen von ${interaction.user.tag}`);
+
+      return interaction.followUp({
+        content: result.ok ? `✅ ${result.message}` : `❌ ${result.message}`,
+        ephemeral: true,
+      });
     }
 
     if (interaction.isChatInputCommand() && interaction.commandName === "leaderpanel") {
