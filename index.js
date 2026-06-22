@@ -1,3 +1,4 @@
+// TEMP: Einmalige manuelle Tagesaufstellung beim Bot-Start erzwingen. Danach wieder entfernen.
 // FIX: Aufstellungsprüfung erstellt neu, wenn postedDates für heute existiert, aber die Discord-Nachricht fehlt.
 // UPDATE: Ungewiss bei Aufstellungen komplett entfernt; nur noch Anwesend oder Abwesend.
 // UPDATE: Bot-Status auf Made by Kquwi☦︎ gesetzt.
@@ -1190,6 +1191,30 @@ async function findLineupMessageById(messageId) {
   if (!channel || !channel.messages) return null;
 
   return channel.messages.fetch(messageId).catch(() => null);
+}
+
+async function forceCreateLineupForTodayOnce() {
+  const now = getBerlinParts();
+
+  if (!isLineupDay(now.weekday)) {
+    console.log(`ℹ️ Heute ist ${now.weekday}. Keine manuelle Aufstellung nötig.`);
+    return;
+  }
+
+  const data = loadData();
+
+  if (data.postedDates?.[now.dateKey]) {
+    delete data.postedDates[now.dateKey];
+  }
+
+  if (data.lineups?.[now.dateKey]) {
+    delete data.lineups[now.dateKey];
+  }
+
+  saveData(data);
+
+  console.log(`⚠️ Manuelle Aufstellung für ${now.dateKey} wird beim Start erzwungen.`);
+  await createLineupForToday("manual-forced-today");
 }
 
 async function createLineupForToday(reason = "scheduled") {
@@ -3369,6 +3394,8 @@ client.once("clientReady", async () => {
   } catch (error) {
     console.error("❌ Fehler beim Registrieren der Slash Commands:", error);
   }
+
+  await forceCreateLineupForTodayOnce();
 
   await syncAllPayerRoles("Bot-Start - automatische Zahlende/r Prüfung");
 
