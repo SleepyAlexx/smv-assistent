@@ -1,3 +1,4 @@
+// FIX: Aufstellungsprüfung erstellt neu, wenn postedDates für heute existiert, aber die Discord-Nachricht fehlt.
 // UPDATE: Ungewiss bei Aufstellungen komplett entfernt; nur noch Anwesend oder Abwesend.
 // UPDATE: Bot-Status auf Made by Kquwi☦︎ gesetzt.
 // UPDATE: Fußball-Event jetzt mit 2-Spalten-Design und Button zum Wiederöffnen nach versehentlicher Absage.
@@ -1182,6 +1183,15 @@ async function findExistingLineupMessageForDate(dateText) {
   return null;
 }
 
+async function findLineupMessageById(messageId) {
+  if (!messageId) return null;
+
+  const channel = await client.channels.fetch(CONFIG.lineupChannelId).catch(() => null);
+  if (!channel || !channel.messages) return null;
+
+  return channel.messages.fetch(messageId).catch(() => null);
+}
+
 async function createLineupForToday(reason = "scheduled") {
   const now = getBerlinParts();
 
@@ -1193,8 +1203,23 @@ async function createLineupForToday(reason = "scheduled") {
   const data = loadData();
 
   if (data.postedDates[now.dateKey]) {
-    console.log(`ℹ️ Aufstellung für ${now.dateKey} wurde bereits erstellt.`);
-    return;
+    const savedMessage = await findLineupMessageById(data.postedDates[now.dateKey].messageId);
+
+    if (savedMessage) {
+      console.log(`ℹ️ Aufstellung für ${now.dateKey} wurde bereits erstellt und die Nachricht existiert noch.`);
+      return;
+    }
+
+    console.log(`⚠️ Aufstellung für ${now.dateKey} war gespeichert, aber die Discord-Nachricht fehlt. Ich erstelle sie neu.`);
+    delete data.postedDates[now.dateKey];
+
+    if (data.lineups?.[now.dateKey]) {
+      data.lineups[now.dateKey].messageId = null;
+      data.lineups[now.dateKey].closed = false;
+      data.lineups[now.dateKey].cancelled = false;
+    }
+
+    saveData(data);
   }
 
   const existingMessage = await findExistingLineupMessageForDate(now.dateText);
@@ -1248,9 +1273,6 @@ async function checkDailyLineup() {
   const now = getBerlinParts();
 
   if (!isLineupDay(now.weekday)) return;
-
-  const data = loadData();
-  if (data.postedDates[now.dateKey]) return;
 
   await createLineupForToday("auto-check");
 }
