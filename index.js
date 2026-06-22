@@ -1,3 +1,4 @@
+// UPDATE: Ungewiss bei Aufstellungen komplett entfernt; nur noch Anwesend oder Abwesend.
 // UPDATE: Bot-Status auf Made by Kquwi☦︎ gesetzt.
 // UPDATE: Fußball-Event jetzt mit 2-Spalten-Design und Button zum Wiederöffnen nach versehentlicher Absage.
 // UPDATE: Aufstellung jetzt mit 2-Spalten-Design und Button zum Wiederöffnen nach versehentlicher Absage.
@@ -834,7 +835,6 @@ function formatLineupUserList(users) {
 function createLineupEmbed(lineup) {
   const presentUsers = getUsersByStatus(lineup, "present");
   const absentUsers = getUsersByStatus(lineup, "absent");
-  const unsureUsers = getUsersByStatus(lineup, "unsure");
   const total = presentUsers.length + absentUsers.length + unsureUsers.length;
   const statusText = getLineupStatus(lineup);
 
@@ -850,7 +850,6 @@ function createLineupEmbed(lineup) {
         "**Deskription:**",
         "✅ Ihr schafft es pünktlich zur Aufstellung zu kommen.",
         "❌ Ihr schafft es nicht zur Aufstellung zu kommen.",
-        "⏳ Ihr schafft es in der angegebenen Zeit zur Aufstellung.",
       ].join("\n")
     )
     .addFields(
@@ -863,11 +862,6 @@ function createLineupEmbed(lineup) {
         name: `❌ Abwesend (${absentUsers.length})`,
         value: formatLineupUserList(absentUsers),
         inline: true,
-      },
-      {
-        name: `⏳ Ungewiss (${unsureUsers.length})`,
-        value: formatLineupUserList(unsureUsers),
-        inline: false,
       },
       {
         name: "Info",
@@ -886,7 +880,6 @@ function createLineupEmbed(lineup) {
 function createLineupButtons(lineup) {
   const presentUsers = getUsersByStatus(lineup, "present");
   const absentUsers = getUsersByStatus(lineup, "absent");
-  const unsureUsers = getUsersByStatus(lineup, "unsure");
   const closed = isLineupInteractionClosed(lineup);
 
   const participationRow = new ActionRowBuilder().addComponents(
@@ -902,13 +895,6 @@ function createLineupButtons(lineup) {
       .setLabel(`${absentUsers.length}`)
       .setEmoji("❌")
       .setStyle(ButtonStyle.Secondary)
-      .setDisabled(closed),
-
-    new ButtonBuilder()
-      .setCustomId(`lineup_unsure_${lineup.dateKey}`)
-      .setLabel(`${unsureUsers.length}`)
-      .setEmoji("⏳")
-      .setStyle(ButtonStyle.Primary)
       .setDisabled(closed)
   );
 
@@ -3676,7 +3662,6 @@ client.on("interactionCreate", async (interaction) => {
       const statusMap = {
         present: "present",
         absent: "absent",
-        unsure: "unsure",
       };
 
       const selectedStatus = statusMap[action];
@@ -3729,7 +3714,6 @@ client.on("interactionCreate", async (interaction) => {
       const statusText = {
         present: "Anwesend",
         absent: "Abwesend",
-        unsure: "Ungewiss",
       }[selectedStatus];
 
       return interaction.reply({
@@ -3770,7 +3754,6 @@ client.on("interactionCreate", async (interaction) => {
       const statusMap = {
         present: "present",
         absent: "absent",
-        unsure: "unsure",
       };
 
       const selectedStatus = statusMap[action];
@@ -3816,7 +3799,6 @@ client.on("interactionCreate", async (interaction) => {
       const statusText = {
         present: "Anwesend",
         absent: "Abwesend",
-        unsure: "Ungewiss",
       }[selectedStatus];
 
       return interaction.reply({
