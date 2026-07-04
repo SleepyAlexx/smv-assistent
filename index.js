@@ -1,3 +1,4 @@
+// UPDATE: Satz 'Die Sonntagsübersicht zählt diese Wochen nicht als offen.' wurde aus der WA-Ausgesetzt-Nachricht entfernt.
 // UPDATE: WA-Aussetzen läuft jetzt sauber über Dropdown 1–6 Wochen, Weiter-Button und danach Grund-Fenster.
 // UPDATE: WA-Aussetzungen zeigen jetzt zu jeder KW auch den Datumsbereich von Montag bis Sonntag.
 // UPDATE: WA-Aussetzungs-/Aktiv-Nachrichten gehen in Channel 1522805016128262155 und pingen die SMV-Rolle.
@@ -2328,7 +2329,6 @@ async function handleWeeklyPaymentPauseModal(interaction) {
             `🕘 **Zeitpunkt:** ${formatGermanDateTimeFromMs(Date.now())}`,
             "",
             "In diesen Wochen muss keine Wochenabgabe bezahlt werden.",
-            "Die Sonntagsübersicht zählt diese Wochen nicht als offen.",
             "━━━━━━━━━━━━━━━━━━━━",
           ].join("\n")
         )
