@@ -1,3 +1,5 @@
+// UPDATE: WA-Button ist jetzt 'WA verwalten' mit Auswahl für Aussetzen oder aktive Aussetzungen ansehen.
+// UPDATE: Leaderpanel hat nur noch einen blauen WA-Button zum Aussetzen; der extra WA-Aussetzungen-Button wurde entfernt.
 // UPDATE: Wochenabgabe kann durch Leader für 1–6 Wochen ausgesetzt werden; pausierte Wochen zählen nicht in der Übersicht.
 // UPDATE: Leave-Nachricht pingt den User jetzt mit @, damit man direkt sieht wer geleavt ist.
 // UPDATE: Abmeldungen werden nur um 00 Uhr geprüft und gelöscht; Bis-Datum wird im Format TT.MM.JJJJ erkannt.
@@ -1433,15 +1435,9 @@ function createLeaderPanelButtons() {
       .setStyle(ButtonStyle.Danger),
 
     new ButtonBuilder()
-      .setCustomId("leader_weekly_pause")
-      .setLabel("WA aussetzen")
+      .setCustomId("leader_weekly_manage")
+      .setLabel("WA verwalten")
       .setEmoji("💸")
-      .setStyle(ButtonStyle.Secondary),
-
-    new ButtonBuilder()
-      .setCustomId("leader_weekly_pause_show")
-      .setLabel("WA Aussetzungen")
-      .setEmoji("📋")
       .setStyle(ButtonStyle.Primary)
   );
 }
@@ -2086,6 +2082,30 @@ function isWeeklyPaymentPaused(weekKey) {
 function getWeeklyPaymentPause(weekKey) {
   const data = loadData();
   return data.weeklyPaymentPauses?.[weekKey] || null;
+}
+
+function createWeeklyPaymentManageMenu() {
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("weekly_pause_manage_select")
+      .setPlaceholder("Was möchtest du machen?")
+      .setMinValues(1)
+      .setMaxValues(1)
+      .addOptions(
+        {
+          label: "Wochenabgabe aussetzen",
+          description: "WA für 1 bis 6 Wochen aussetzen",
+          value: "pause",
+          emoji: "💸",
+        },
+        {
+          label: "Aktive Aussetzungen ansehen",
+          description: "Zeigt aktuell gespeicherte WA-Aussetzungen",
+          value: "show",
+          emoji: "📋",
+        }
+      )
+  );
 }
 
 function createWeeklyPaymentPauseModal() {
@@ -4270,26 +4290,43 @@ client.on("interactionCreate", async (interaction) => {
     // Leaderpanel / Sanktionen
     // -------------------------------
 
-    if (interaction.isButton() && interaction.customId === "leader_weekly_pause") {
+    if (interaction.isButton() && interaction.customId === "leader_weekly_manage") {
       if (!hasLeaderPermission(interaction.member)) {
         return interaction.reply({
-          content: "❌ Du hast keine Berechtigung, die Wochenabgabe auszusetzen.",
+          content: "❌ Du hast keine Berechtigung, die Wochenabgabe zu verwalten.",
           ephemeral: true,
         });
       }
 
-      return interaction.showModal(createWeeklyPaymentPauseModal());
+      return interaction.reply({
+        content: "💸 **Wochenabgabe verwalten**\n\nWähle unten aus, was du machen möchtest.",
+        components: [createWeeklyPaymentManageMenu()],
+        ephemeral: true,
+      });
     }
 
-    if (interaction.isButton() && interaction.customId === "leader_weekly_pause_show") {
+    if (interaction.isStringSelectMenu() && interaction.customId === "weekly_pause_manage_select") {
       if (!hasLeaderPermission(interaction.member)) {
         return interaction.reply({
-          content: "❌ Du hast keine Berechtigung, die Wochenabgabe-Aussetzungen anzusehen.",
+          content: "❌ Du hast keine Berechtigung, die Wochenabgabe zu verwalten.",
           ephemeral: true,
         });
       }
 
-      return showWeeklyPaymentPauses(interaction);
+      const selectedAction = interaction.values[0];
+
+      if (selectedAction === "pause") {
+        return interaction.showModal(createWeeklyPaymentPauseModal());
+      }
+
+      if (selectedAction === "show") {
+        return showWeeklyPaymentPauses(interaction);
+      }
+
+      return interaction.reply({
+        content: "❌ Ungültige Auswahl.",
+        ephemeral: true,
+      });
     }
 
     if (interaction.isModalSubmit() && interaction.customId === "weekly_pause_modal") {
