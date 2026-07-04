@@ -1,3 +1,4 @@
+// UPDATE: /clean Anzahl löscht Nachrichten im aktuellen Channel.
 // UPDATE: Satz 'Die Sonntagsübersicht zählt diese Wochen nicht als offen.' wurde aus der WA-Ausgesetzt-Nachricht entfernt.
 // UPDATE: WA-Aussetzen läuft jetzt sauber über Dropdown 1–6 Wochen, Weiter-Button und danach Grund-Fenster.
 // UPDATE: WA-Aussetzungen zeigen jetzt zu jeder KW auch den Datumsbereich von Montag bis Sonntag.
@@ -3999,6 +4000,20 @@ async function registerCommands() {
           .setMaxValue(6)
       )
       .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("clean")
+      .setDescription("Löscht eine bestimmte Anzahl Nachrichten im aktuellen Channel")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+      .addIntegerOption((option) =>
+        option
+          .setName("anzahl")
+          .setDescription("Wie viele Nachrichten sollen gelöscht werden? 1 bis 100")
+          .setRequired(true)
+          .setMinValue(1)
+          .setMaxValue(100)
+      )
+      .toJSON(),
   ];
 
   const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
@@ -4180,6 +4195,52 @@ client.on("interactionCreate", async (interaction) => {
         content: "✅ Familienpanel wurde gesendet.",
         ephemeral: true,
       });
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === "clean") {
+      if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageMessages)) {
+        return interaction.reply({
+          content: "❌ Du brauchst die Berechtigung **Nachrichten verwalten**, um diesen Befehl zu nutzen.",
+          ephemeral: true,
+        });
+      }
+
+      if (!interaction.channel?.bulkDelete) {
+        return interaction.reply({
+          content: "❌ In diesem Channel können keine Nachrichten gelöscht werden.",
+          ephemeral: true,
+        });
+      }
+
+      const amount = interaction.options.getInteger("anzahl");
+
+      await interaction.reply({
+        content: `🧹 Lösche **${amount}** Nachrichten ...`,
+        ephemeral: true,
+      });
+
+      try {
+        const deletedMessages = await interaction.channel.bulkDelete(amount, true);
+
+        return interaction.followUp({
+          content: `✅ Es wurden **${deletedMessages.size}** Nachrichten gelöscht.`,
+          ephemeral: true,
+        });
+      } catch (error) {
+        console.error("❌ Fehler bei /clean:", error);
+
+        return interaction.followUp({
+          content: [
+            "❌ Nachrichten konnten nicht gelöscht werden.",
+            "",
+            "Mögliche Gründe:",
+            "• Der Bot hat keine Berechtigung **Nachrichten verwalten**.",
+            "• Die Nachrichten sind älter als 14 Tage.",
+            "• Der Bot kann in diesem Channel nicht löschen.",
+          ].join("\n"),
+          ephemeral: true,
+        });
+      }
     }
 
     if (interaction.isChatInputCommand() && interaction.commandName === "zahlende-sync") {
