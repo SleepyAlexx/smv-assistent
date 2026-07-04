@@ -1,3 +1,5 @@
+// UPDATE: Abmeldungen werden nur um 00 Uhr geprüft und gelöscht; Bis-Datum wird im Format TT.MM.JJJJ erkannt.
+// UPDATE: Abmeldungen werden automatisch einen Tag nach dem Bis-Datum gelöscht.
 // FIX: Fehler bei /aufstellung-test und /aufstellung-erzwingen behoben: alte unsureUsers-Referenz in Aufstellung entfernt.
 // FIX: Manueller Slash-Command /aufstellung-erzwingen eingebaut, der die heutige Aufstellung wirklich neu postet.
 // FIX: Aufstellungsprüfung erstellt neu, wenn postedDates für heute existiert, aber die Discord-Nachricht fehlt.
@@ -339,6 +341,7 @@ function getDefaultData() {
     footballEvents: {},
     weeklyPayments: {},
     weeklySummaries: {},
+    absences: {},
   };
 }
 
@@ -366,6 +369,7 @@ function loadData() {
       footballEvents: data.footballEvents || {},
       weeklyPayments: data.weeklyPayments || {},
       weeklySummaries: data.weeklySummaries || {},
+      absences: data.absences || {},
     };
   } catch (error) {
     console.error("❌ smv-data.json konnte nicht gelesen werden:", error);
@@ -486,6 +490,36 @@ function getBerlinParts(date = new Date()) {
     dateKey: `${year}-${month}-${day}`,
     dateText: `${day}.${month}.${year}`,
   };
+}
+
+function parseGermanDateKey(input) {
+  const match = String(input || "").trim().match(/^(\d{1,2})[.](\d{1,2})[.](\d{4})$/);
+  if (!match) return null;
+
+  const day = String(Number(match[1])).padStart(2, "0");
+  const month = String(Number(match[2])).padStart(2, "0");
+  const year = match[3];
+
+  const date = new Date(`${year}-${month}-${day}T12:00:00Z`);
+
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getUTCFullYear() !== Number(year) ||
+    date.getUTCMonth() + 1 !== Number(month) ||
+    date.getUTCDate() !== Number(day)
+  ) {
+    return null;
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
+function shouldDeleteAbsence(absence, nowDateKey = getBerlinParts().dateKey) {
+  if (!absence?.untilDateKey) return false;
+
+  // Einen Tag nach dem Bis-Datum löschen:
+  // Beispiel: Bis 20.06.2026 -> ab 21.06.2026 wird gelöscht.
+  return nowDateKey > absence.untilDateKey;
 }
 
 function formatMoney(amount) {
@@ -1960,8 +1994,31 @@ async function postAbsence(interaction) {
     });
   }
 
+  const untilDateKey = parseGermanDateKey(until);
+
+  if (untilDateKey) {
+    const data = loadData();
+
+    if (!data.absences) data.absences = {};
+
+    data.absences[message.id] = {
+      messageId: message.id,
+      channelId: CONFIG.absenceChannelId,
+      userId: interaction.user.id,
+      name,
+      from,
+      until,
+      untilDateKey,
+      createdAt: new Date().toISOString(),
+    };
+
+    saveData(data);
+  }
+
   return interaction.reply({
-    content: `✅ Deine Abmeldung wurde erfolgreich in <#${CONFIG.absenceChannelId}> eingereicht.`,
+    content: untilDateKey
+      ? `✅ Deine Abmeldung wurde erfolgreich in <#${CONFIG.absenceChannelId}> eingereicht. Sie wird automatisch einen Tag nach dem Bis-Datum um 00 Uhr gelöscht.`
+      : `✅ Deine Abmeldung wurde erfolgreich in <#${CONFIG.absenceChannelId}> eingereicht. ⚠️ Das Bis-Datum konnte nicht sauber erkannt werden, daher wird diese Abmeldung nicht automatisch gelöscht.`,
     ephemeral: true,
   });
 }
@@ -3286,6 +3343,47 @@ async function createAndPostFootballEvent(interaction) {
 }
 
 
+async function checkAbsenceDeletions() {
+  const now = getBerlinParts();
+
+  // Abmeldungen werden bewusst nur nachts um 00 Uhr geprüft.
+  // Da der Scheduler jede Minute läuft, bedeutet das: zwischen 00:00 und 00:59.
+  if (now.hour !== "00") return;
+
+  const data = loadData();
+
+  if (!data.absences || Object.keys(data.absences).length === 0) return;
+
+  let changed = false;
+
+  for (const [absenceId, absence] of Object.entries(data.absences)) {
+    if (!shouldDeleteAbsence(absence, now.dateKey)) continue;
+
+    const channel = await client.channels.fetch(absence.channelId || CONFIG.absenceChannelId).catch(() => null);
+
+    if (!channel || !channel.messages) {
+      console.error(`❌ Abmeldungs-Channel nicht gefunden: ${absence.channelId || CONFIG.absenceChannelId}`);
+      continue;
+    }
+
+    const message = await channel.messages.fetch(absence.messageId).catch(() => null);
+
+    if (message) {
+      await message.delete().catch((error) => {
+        console.error(`❌ Abmeldung ${absence.messageId} konnte nicht gelöscht werden:`, error.message);
+      });
+    }
+
+    delete data.absences[absenceId];
+    changed = true;
+
+    console.log(`🧹 Abmeldung automatisch gelöscht/entfernt: ${absence.name || absence.userId || absenceId}`);
+  }
+
+  if (changed) saveData(data);
+}
+
+
 // =====================================================
 // SCHEDULER
 // =====================================================
@@ -3308,6 +3406,10 @@ function startSchedulers() {
     console.error("❌ Fehler bei erster Aufstellungs-Schließprüfung:", error);
   });
 
+  checkAbsenceDeletions().catch((error) => {
+    console.error("❌ Fehler bei erster Abmeldungs-Löschprüfung:", error);
+  });
+
   // Jede Minute prüfen.
   setInterval(() => {
     checkDailyLineup().catch((error) => {
@@ -3324,6 +3426,10 @@ function startSchedulers() {
 
     checkLineupClosures().catch((error) => {
       console.error("❌ Fehler bei Aufstellungs-Schließprüfung:", error);
+    });
+
+    checkAbsenceDeletions().catch((error) => {
+      console.error("❌ Fehler bei Abmeldungs-Löschprüfung:", error);
     });
   }, 60 * 1000);
 
