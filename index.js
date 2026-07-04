@@ -1,3 +1,4 @@
+// UPDATE: WA-Aussetzungen zeigen jetzt zu jeder KW auch den Datumsbereich von Montag bis Sonntag.
 // UPDATE: WA-Aussetzungs-/Aktiv-Nachrichten gehen in Channel 1522805016128262155 und pingen die SMV-Rolle.
 // UPDATE: WA-Aussetzungen können jetzt wieder rückgängig gemacht werden.
 // UPDATE: WA-Button ist jetzt 'WA verwalten' mit Auswahl für Aussetzen oder aktive Aussetzungen ansehen.
@@ -2077,6 +2078,59 @@ function formatWeekList(weekKeys) {
   return weekKeys.map((weekKey) => `• ${weekKey}`).join("\n");
 }
 
+function parseWeekKey(weekKey) {
+  const match = String(weekKey || "").match(/^(\d{4})-KW(\d{2})$/);
+
+  if (!match) return null;
+
+  return {
+    year: Number(match[1]),
+    week: Number(match[2]),
+  };
+}
+
+function getDateRangeForWeekKey(weekKey) {
+  const parsed = parseWeekKey(weekKey);
+
+  if (!parsed) return null;
+
+  const simpleDate = new Date(Date.UTC(parsed.year, 0, 1 + (parsed.week - 1) * 7));
+  const dayOfWeek = simpleDate.getUTCDay() || 7;
+
+  const monday = new Date(simpleDate);
+  monday.setUTCDate(simpleDate.getUTCDate() - dayOfWeek + 1);
+
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+
+  return {
+    from: monday.toLocaleDateString("de-DE", {
+      timeZone: CONFIG.timezone,
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }),
+    until: sunday.toLocaleDateString("de-DE", {
+      timeZone: CONFIG.timezone,
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }),
+  };
+}
+
+function formatWeekListWithDateRanges(weekKeys) {
+  if (!weekKeys || weekKeys.length === 0) return "—";
+
+  return weekKeys.map((weekKey) => {
+    const range = getDateRangeForWeekKey(weekKey);
+
+    if (!range) return `• ${weekKey}`;
+
+    return `• ${weekKey}\n  └ ${range.from} bis ${range.until}`;
+  }).join("\n");
+}
+
 function isWeeklyPaymentPaused(weekKey) {
   const data = loadData();
   return Boolean(data.weeklyPaymentPauses?.[weekKey]);
@@ -2158,6 +2212,7 @@ function createWeeklyPaymentPausedEmbed(weekKey, pause) {
         "Die Wochenabgabe entfällt für diese Woche.",
         "",
         `📅 **Woche:** ${weekKey}`,
+        `🗓️ **Zeitraum:** ${getDateRangeForWeekKey(weekKey) ? `${getDateRangeForWeekKey(weekKey).from} bis ${getDateRangeForWeekKey(weekKey).until}` : "—"}`,
         `📝 **Grund:** ${pause.reason || "—"}`,
         `👑 **Ausgesetzt von:** <@${pause.pausedBy}>`,
         `🕘 **Ausgesetzt am:** ${formatGermanDateTimeFromMs(pause.pausedAt)}`,
@@ -2217,7 +2272,7 @@ async function handleWeeklyPaymentPauseModal(interaction) {
             "Die Wochenabgabe wurde von der Leaderschaft ausgesetzt.",
             "",
             `📅 **Ausgesetzte Wochen:**`,
-            formatWeekList(weekKeys),
+            formatWeekListWithDateRanges(weekKeys),
             "",
             `📝 **Grund:** ${reason}`,
             `👑 **Ausgesetzt von:** <@${interaction.user.id}>`,
@@ -2238,7 +2293,7 @@ async function handleWeeklyPaymentPauseModal(interaction) {
       "✅ Wochenabgabe wurde ausgesetzt.",
       "",
       "**Ausgesetzte Wochen:**",
-      formatWeekList(weekKeys),
+      formatWeekListWithDateRanges(weekKeys),
     ].join("\n"),
     ephemeral: true,
   });
@@ -2257,7 +2312,9 @@ async function showWeeklyPaymentPauses(interaction) {
   }
 
   const lines = pauses.map(([weekKey, pause]) => {
-    return `• **${weekKey}** — ${pause.reason || "Kein Grund"} — von <@${pause.pausedBy}>`;
+    const range = getDateRangeForWeekKey(weekKey);
+    const rangeText = range ? ` (${range.from} bis ${range.until})` : "";
+    return `• **${weekKey}**${rangeText} — ${pause.reason || "Kein Grund"} — von <@${pause.pausedBy}>`;
   });
 
   return interaction.reply({
@@ -2309,7 +2366,9 @@ async function showWeeklyPaymentPauseRemoveMenu(interaction) {
   }
 
   const lines = pauses.map(([weekKey, pause]) => {
-    return `• **${weekKey}** — ${pause.reason || "Kein Grund"} — von <@${pause.pausedBy}>`;
+    const range = getDateRangeForWeekKey(weekKey);
+    const rangeText = range ? ` (${range.from} bis ${range.until})` : "";
+    return `• **${weekKey}**${rangeText} — ${pause.reason || "Kein Grund"} — von <@${pause.pausedBy}>`;
   });
 
   return interaction.reply({
@@ -2365,6 +2424,7 @@ async function removeWeeklyPaymentPause(interaction, weekKey) {
             "Die Wochenabgabe-Aussetzung wurde aufgehoben.",
             "",
             `📅 **Woche:** ${weekKey}`,
+            `🗓️ **Zeitraum:** ${getDateRangeForWeekKey(weekKey) ? `${getDateRangeForWeekKey(weekKey).from} bis ${getDateRangeForWeekKey(weekKey).until}` : "—"}`,
             "Diese Woche zählt jetzt wieder normal.",
             "",
             `👑 **Aufgehoben von:** <@${interaction.user.id}>`,
