@@ -1,3 +1,4 @@
+// UPDATE: Abmeldungen werden jetzt erst 7 Tage nach dem Bis-Datum um 00 Uhr automatisch gelöscht.
 // UPDATE: Neuer Abmeldungs-Channel auf 1522813672244908135 gesetzt.
 // UPDATE: /clean Anzahl löscht Nachrichten im aktuellen Channel.
 // UPDATE: Satz 'Die Sonntagsübersicht zählt diese Wochen nicht als offen.' wurde aus der WA-Ausgesetzt-Nachricht entfernt.
@@ -10,7 +11,7 @@
 // UPDATE: Wochenabgabe kann durch Leader für 1–6 Wochen ausgesetzt werden; pausierte Wochen zählen nicht in der Übersicht.
 // UPDATE: Leave-Nachricht pingt den User jetzt mit @, damit man direkt sieht wer geleavt ist.
 // UPDATE: Abmeldungen werden nur um 00 Uhr geprüft und gelöscht; Bis-Datum wird im Format TT.MM.JJJJ erkannt.
-// UPDATE: Abmeldungen werden automatisch einen Tag nach dem Bis-Datum gelöscht.
+// UPDATE: Abmeldungen werden automatisch 7 Tage nach dem Bis-Datum gelöscht.
 // FIX: Fehler bei /aufstellung-test und /aufstellung-erzwingen behoben: alte unsureUsers-Referenz in Aufstellung entfernt.
 // FIX: Manueller Slash-Command /aufstellung-erzwingen eingebaut, der die heutige Aufstellung wirklich neu postet.
 // FIX: Aufstellungsprüfung erstellt neu, wenn postedDates für heute existiert, aber die Discord-Nachricht fehlt.
@@ -528,12 +529,32 @@ function parseGermanDateKey(input) {
   return `${year}-${month}-${day}`;
 }
 
+function addDaysToDateKey(dateKey, days = 0) {
+  if (!dateKey) return null;
+
+  const date = new Date(`${dateKey}T12:00:00Z`);
+
+  if (Number.isNaN(date.getTime())) return null;
+
+  date.setUTCDate(date.getUTCDate() + days);
+
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
 function shouldDeleteAbsence(absence, nowDateKey = getBerlinParts().dateKey) {
   if (!absence?.untilDateKey) return false;
 
-  // Einen Tag nach dem Bis-Datum löschen:
-  // Beispiel: Bis 20.06.2026 -> ab 21.06.2026 wird gelöscht.
-  return nowDateKey > absence.untilDateKey;
+  // Erst 7 Tage nach dem Bis-Datum löschen:
+  // Beispiel: Bis 20.06.2026 -> ab 27.06.2026 um 00 Uhr wird gelöscht.
+  const deleteDateKey = addDaysToDateKey(absence.untilDateKey, 7);
+
+  if (!deleteDateKey) return false;
+
+  return nowDateKey >= deleteDateKey;
 }
 
 function formatMoney(amount) {
@@ -2040,7 +2061,7 @@ async function postAbsence(interaction) {
 
   return interaction.reply({
     content: untilDateKey
-      ? `✅ Deine Abmeldung wurde erfolgreich in <#${CONFIG.absenceChannelId}> eingereicht. Sie wird automatisch einen Tag nach dem Bis-Datum um 00 Uhr gelöscht.`
+      ? `✅ Deine Abmeldung wurde erfolgreich in <#${CONFIG.absenceChannelId}> eingereicht. Sie wird automatisch 7 Tage nach dem Bis-Datum um 00 Uhr gelöscht.`
       : `✅ Deine Abmeldung wurde erfolgreich in <#${CONFIG.absenceChannelId}> eingereicht. ⚠️ Das Bis-Datum konnte nicht sauber erkannt werden, daher wird diese Abmeldung nicht automatisch gelöscht.`,
     ephemeral: true,
   });
