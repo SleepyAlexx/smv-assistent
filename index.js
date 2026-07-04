@@ -1,3 +1,5 @@
+// UPDATE: WA-Aussetzungs-/Aktiv-Nachrichten gehen in Channel 1522805016128262155 und pingen die SMV-Rolle.
+// UPDATE: WA-Aussetzungen können jetzt wieder rückgängig gemacht werden.
 // UPDATE: WA-Button ist jetzt 'WA verwalten' mit Auswahl für Aussetzen oder aktive Aussetzungen ansehen.
 // UPDATE: Leaderpanel hat nur noch einen blauen WA-Button zum Aussetzen; der extra WA-Aussetzungen-Button wurde entfernt.
 // UPDATE: Wochenabgabe kann durch Leader für 1–6 Wochen ausgesetzt werden; pausierte Wochen zählen nicht in der Übersicht.
@@ -127,6 +129,7 @@ const CONFIG = {
 
   // Wochenabgabe-Log und Übersicht
   weeklyPaymentChannelId: "1508307008389124246",
+  weeklyPaymentAnnouncementChannelId: "1522805016128262155",
 
   // Diese User bekommen keine Zahlende/r-Rolle
   payerExcludedUserIds: [
@@ -2103,6 +2106,12 @@ function createWeeklyPaymentManageMenu() {
           description: "Zeigt aktuell gespeicherte WA-Aussetzungen",
           value: "show",
           emoji: "📋",
+        },
+        {
+          label: "Aussetzung aufheben",
+          description: "Eine ausgesetzte Woche wieder aktivieren",
+          value: "remove",
+          emoji: "🔁",
         }
       )
   );
@@ -2146,14 +2155,14 @@ function createWeeklyPaymentPausedEmbed(weekKey, pause) {
     .setDescription(
       [
         "━━━━━━━━━━━━━━━━━━━━",
+        "Die Wochenabgabe entfällt für diese Woche.",
+        "",
         `📅 **Woche:** ${weekKey}`,
+        `📝 **Grund:** ${pause.reason || "—"}`,
+        `👑 **Ausgesetzt von:** <@${pause.pausedBy}>`,
+        `🕘 **Ausgesetzt am:** ${formatGermanDateTimeFromMs(pause.pausedAt)}`,
         "",
-        "Diese Woche entfällt die Wochenabgabe.",
-        "Es wird keine Bezahlt/Nicht-bezahlt-Liste erstellt.",
-        "",
-        `👑 **Eingetragen von:** <@${pause.pausedBy}>`,
-        `🕘 **Eingetragen am:** ${formatGermanDateTimeFromMs(pause.pausedAt)}`,
-        pause.reason ? `📝 **Grund:** ${pause.reason}` : "📝 **Grund:** —",
+        "Für diese Woche wird keine Bezahlt/Nicht-bezahlt-Liste erstellt.",
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
     )
@@ -2196,7 +2205,8 @@ async function handleWeeklyPaymentPauseModal(interaction) {
 
   saveData(data);
 
-  await sendToChannel(CONFIG.weeklyPaymentChannelId, {
+  await sendToChannel(CONFIG.weeklyPaymentAnnouncementChannelId, {
+    content: `<@&${CONFIG.lineupMentionRoleId}>`,
     embeds: [
       new EmbedBuilder()
         .setColor(CONFIG.warningColor)
@@ -2204,20 +2214,23 @@ async function handleWeeklyPaymentPauseModal(interaction) {
         .setDescription(
           [
             "━━━━━━━━━━━━━━━━━━━━",
-            `👑 **Eingetragen von:** <@${interaction.user.id}>`,
+            "Die Wochenabgabe wurde von der Leaderschaft ausgesetzt.",
+            "",
             `📅 **Ausgesetzte Wochen:**`,
             formatWeekList(weekKeys),
             "",
             `📝 **Grund:** ${reason}`,
+            `👑 **Ausgesetzt von:** <@${interaction.user.id}>`,
+            `🕘 **Zeitpunkt:** ${formatGermanDateTimeFromMs(Date.now())}`,
             "",
-            "In diesen Wochen zählt die Wochenabgabe nicht.",
-            "Die Sonntagsübersicht zeigt dann automatisch, dass die Woche ausgesetzt ist.",
+            "In diesen Wochen muss keine Wochenabgabe bezahlt werden.",
+            "Die Sonntagsübersicht zählt diese Wochen nicht als offen.",
             "━━━━━━━━━━━━━━━━━━━━",
           ].join("\n")
         )
         .setFooter({ text: `${CONFIG.shortName} • Wochenabgabe` }),
     ],
-    allowedMentions: { users: [interaction.user.id] },
+    allowedMentions: { roles: [CONFIG.lineupMentionRoleId], users: [interaction.user.id] },
   });
 
   return interaction.reply({
@@ -2257,6 +2270,120 @@ async function showWeeklyPaymentPauses(interaction) {
     ],
     ephemeral: true,
     allowedMentions: { users: pauses.map(([, pause]) => pause.pausedBy).filter(Boolean).slice(0, 100) },
+  });
+}
+
+function createWeeklyPauseRemoveButtons(pauses) {
+  const rows = [];
+  const entries = pauses.slice(0, 25);
+
+  for (let i = 0; i < entries.length; i += 5) {
+    const rowEntries = entries.slice(i, i + 5);
+
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        rowEntries.map(([weekKey]) =>
+          new ButtonBuilder()
+            .setCustomId(`weekly_pause_remove_${weekKey}`)
+            .setLabel(weekKey)
+            .setEmoji("🔁")
+            .setStyle(ButtonStyle.Secondary)
+        )
+      )
+    );
+  }
+
+  return rows;
+}
+
+async function showWeeklyPaymentPauseRemoveMenu(interaction) {
+  const data = loadData();
+  const pauses = Object.entries(data.weeklyPaymentPauses || {})
+    .sort(([a], [b]) => a.localeCompare(b));
+
+  if (pauses.length === 0) {
+    return interaction.reply({
+      content: "ℹ️ Aktuell sind keine Wochenabgaben ausgesetzt.",
+      ephemeral: true,
+    });
+  }
+
+  const lines = pauses.map(([weekKey, pause]) => {
+    return `• **${weekKey}** — ${pause.reason || "Kein Grund"} — von <@${pause.pausedBy}>`;
+  });
+
+  return interaction.reply({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(CONFIG.warningColor)
+        .setTitle("🔁 WOCHENABGABE-AUSSETZUNG AUFHEBEN")
+        .setDescription(
+          [
+            "Wähle unten die Woche aus, die wieder aktiv werden soll.",
+            "",
+            lines.join("\n"),
+          ].join("\n").slice(0, 4000)
+        )
+        .setFooter({ text: `${CONFIG.shortName} • Wochenabgabe` }),
+    ],
+    components: createWeeklyPauseRemoveButtons(pauses),
+    ephemeral: true,
+    allowedMentions: { users: pauses.map(([, pause]) => pause.pausedBy).filter(Boolean).slice(0, 100) },
+  });
+}
+
+async function removeWeeklyPaymentPause(interaction, weekKey) {
+  if (!hasLeaderPermission(interaction.member)) {
+    return interaction.reply({
+      content: "❌ Du hast keine Berechtigung, eine Wochenabgabe-Aussetzung aufzuheben.",
+      ephemeral: true,
+    });
+  }
+
+  const data = loadData();
+
+  if (!data.weeklyPaymentPauses?.[weekKey]) {
+    return interaction.reply({
+      content: `ℹ️ Für **${weekKey}** ist aktuell keine Wochenabgabe ausgesetzt.`,
+      ephemeral: true,
+    });
+  }
+
+  const oldPause = data.weeklyPaymentPauses[weekKey];
+  delete data.weeklyPaymentPauses[weekKey];
+  saveData(data);
+
+  await sendToChannel(CONFIG.weeklyPaymentAnnouncementChannelId, {
+    content: `<@&${CONFIG.lineupMentionRoleId}>`,
+    embeds: [
+      new EmbedBuilder()
+        .setColor(CONFIG.successColor)
+        .setTitle("🔁 WOCHENABGABE WIEDER AKTIV")
+        .setDescription(
+          [
+            "━━━━━━━━━━━━━━━━━━━━",
+            "Die Wochenabgabe-Aussetzung wurde aufgehoben.",
+            "",
+            `📅 **Woche:** ${weekKey}`,
+            "Diese Woche zählt jetzt wieder normal.",
+            "",
+            `👑 **Aufgehoben von:** <@${interaction.user.id}>`,
+            `🕘 **Zeitpunkt:** ${formatGermanDateTimeFromMs(Date.now())}`,
+            oldPause?.reason ? `📝 **Vorheriger Grund:** ${oldPause.reason}` : "📝 **Vorheriger Grund:** —",
+            "",
+            "Alle Zahlungspflichtigen müssen diese Woche wieder normal Wochenabgabe zahlen.",
+            "━━━━━━━━━━━━━━━━━━━━",
+          ].join("\n")
+        )
+        .setFooter({ text: `${CONFIG.shortName} • Wochenabgabe` }),
+    ],
+    allowedMentions: { roles: [CONFIG.lineupMentionRoleId], users: [interaction.user.id] },
+  });
+
+  return interaction.update({
+    content: `✅ Die Wochenabgabe für **${weekKey}** ist jetzt wieder aktiv.`,
+    embeds: [],
+    components: [],
   });
 }
 
@@ -3027,9 +3154,10 @@ async function postWeeklyPaymentOverview(reason = "scheduled") {
   const pause = getWeeklyPaymentPause(weekKey);
 
   if (pause) {
-    await sendToChannel(CONFIG.weeklyPaymentChannelId, {
+    await sendToChannel(CONFIG.weeklyPaymentAnnouncementChannelId, {
+      content: `<@&${CONFIG.lineupMentionRoleId}>`,
       embeds: [createWeeklyPaymentPausedEmbed(weekKey, pause)],
-      allowedMentions: { users: [pause.pausedBy].filter(Boolean) },
+      allowedMentions: { roles: [CONFIG.lineupMentionRoleId], users: [pause.pausedBy].filter(Boolean) },
     });
 
     await saveWeeklySummaryDb({
@@ -4323,10 +4451,19 @@ client.on("interactionCreate", async (interaction) => {
         return showWeeklyPaymentPauses(interaction);
       }
 
+      if (selectedAction === "remove") {
+        return showWeeklyPaymentPauseRemoveMenu(interaction);
+      }
+
       return interaction.reply({
         content: "❌ Ungültige Auswahl.",
         ephemeral: true,
       });
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith("weekly_pause_remove_")) {
+      const weekKey = interaction.customId.replace("weekly_pause_remove_", "");
+      return removeWeeklyPaymentPause(interaction, weekKey);
     }
 
     if (interaction.isModalSubmit() && interaction.customId === "weekly_pause_modal") {
