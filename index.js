@@ -1,3 +1,4 @@
+// UPDATE: Leave-Nachricht pingt den User jetzt mit @, damit man direkt sieht wer geleavt ist.
 // UPDATE: Abmeldungen werden nur um 00 Uhr geprüft und gelöscht; Bis-Datum wird im Format TT.MM.JJJJ erkannt.
 // UPDATE: Abmeldungen werden automatisch einen Tag nach dem Bis-Datum gelöscht.
 // FIX: Fehler bei /aufstellung-test und /aufstellung-erzwingen behoben: alte unsureUsers-Referenz in Aufstellung entfernt.
@@ -3578,10 +3579,11 @@ client.on("guildMemberAdd", async (member) => {
 
 client.on("guildMemberRemove", async (member) => {
   try {
-    const message = `Poka, ${member.user.tag}!`;
+    const message = `Poka, <@${member.id}>!`;
 
     await sendToChannel(CONFIG.leaveChannelId, {
       content: message,
+      allowedMentions: { users: [member.id] },
     });
 
     console.log(`✅ Leave-Nachricht gesendet für ${member.user.tag}`);
