@@ -1,3 +1,4 @@
+// UPDATE: Wochenabgabe kann durch Leader für 1–6 Wochen ausgesetzt werden; pausierte Wochen zählen nicht in der Übersicht.
 // UPDATE: Leave-Nachricht pingt den User jetzt mit @, damit man direkt sieht wer geleavt ist.
 // UPDATE: Abmeldungen werden nur um 00 Uhr geprüft und gelöscht; Bis-Datum wird im Format TT.MM.JJJJ erkannt.
 // UPDATE: Abmeldungen werden automatisch einen Tag nach dem Bis-Datum gelöscht.
@@ -342,6 +343,7 @@ function getDefaultData() {
     footballEvents: {},
     weeklyPayments: {},
     weeklySummaries: {},
+    weeklyPaymentPauses: {},
     absences: {},
   };
 }
@@ -370,6 +372,7 @@ function loadData() {
       footballEvents: data.footballEvents || {},
       weeklyPayments: data.weeklyPayments || {},
       weeklySummaries: data.weeklySummaries || {},
+      weeklyPaymentPauses: data.weeklyPaymentPauses || {},
       absences: data.absences || {},
     };
   } catch (error) {
@@ -1410,6 +1413,9 @@ function createLeaderPanelEmbed() {
         "**⚠️ Sanktionen**",
         "└ User auswählen, eine oder mehrere Sanktionen vergeben und automatisch berechnen lassen.",
         "",
+        "**💸 Wochenabgabe**",
+        "└ Wochenabgabe für 1 bis 6 Wochen aussetzen oder aktive Aussetzungen anzeigen.",
+        "",
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
     )
@@ -1424,7 +1430,19 @@ function createLeaderPanelButtons() {
       .setCustomId("leader_create_sanction")
       .setLabel("Sanktion erstellen")
       .setEmoji("⚠️")
-      .setStyle(ButtonStyle.Danger)
+      .setStyle(ButtonStyle.Danger),
+
+    new ButtonBuilder()
+      .setCustomId("leader_weekly_pause")
+      .setLabel("WA aussetzen")
+      .setEmoji("💸")
+      .setStyle(ButtonStyle.Secondary),
+
+    new ButtonBuilder()
+      .setCustomId("leader_weekly_pause_show")
+      .setLabel("WA Aussetzungen")
+      .setEmoji("📋")
+      .setStyle(ButtonStyle.Primary)
   );
 }
 
@@ -2060,6 +2078,168 @@ function formatWeekList(weekKeys) {
   return weekKeys.map((weekKey) => `• ${weekKey}`).join("\n");
 }
 
+function isWeeklyPaymentPaused(weekKey) {
+  const data = loadData();
+  return Boolean(data.weeklyPaymentPauses?.[weekKey]);
+}
+
+function getWeeklyPaymentPause(weekKey) {
+  const data = loadData();
+  return data.weeklyPaymentPauses?.[weekKey] || null;
+}
+
+function createWeeklyPaymentPauseModal() {
+  const modal = new ModalBuilder()
+    .setCustomId("weekly_pause_modal")
+    .setTitle("💸 Wochenabgabe aussetzen");
+
+  const weeksInput = new TextInputBuilder()
+    .setCustomId("weekly_pause_weeks")
+    .setLabel("Wie viele Wochen?")
+    .setPlaceholder("1 bis 6")
+    .setStyle(TextInputStyle.Short)
+    .setMinLength(1)
+    .setMaxLength(1)
+    .setRequired(true);
+
+  const reasonInput = new TextInputBuilder()
+    .setCustomId("weekly_pause_reason")
+    .setLabel("Grund")
+    .setPlaceholder("z. B. Eventwoche, Pause, Absprache ...")
+    .setStyle(TextInputStyle.Paragraph)
+    .setMinLength(2)
+    .setMaxLength(300)
+    .setRequired(false);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(weeksInput),
+    new ActionRowBuilder().addComponents(reasonInput)
+  );
+
+  return modal;
+}
+
+function createWeeklyPaymentPausedEmbed(weekKey, pause) {
+  return new EmbedBuilder()
+    .setColor(CONFIG.warningColor)
+    .setTitle("💸 WOCHENABGABE AUSGESETZT")
+    .setDescription(
+      [
+        "━━━━━━━━━━━━━━━━━━━━",
+        `📅 **Woche:** ${weekKey}`,
+        "",
+        "Diese Woche entfällt die Wochenabgabe.",
+        "Es wird keine Bezahlt/Nicht-bezahlt-Liste erstellt.",
+        "",
+        `👑 **Eingetragen von:** <@${pause.pausedBy}>`,
+        `🕘 **Eingetragen am:** ${formatGermanDateTimeFromMs(pause.pausedAt)}`,
+        pause.reason ? `📝 **Grund:** ${pause.reason}` : "📝 **Grund:** —",
+        "━━━━━━━━━━━━━━━━━━━━",
+      ].join("\n")
+    )
+    .setFooter({ text: `${CONFIG.shortName} • Wochenabgabe • Ausgesetzt` });
+}
+
+async function handleWeeklyPaymentPauseModal(interaction) {
+  if (!hasLeaderPermission(interaction.member)) {
+    return interaction.reply({
+      content: "❌ Du hast keine Berechtigung, die Wochenabgabe auszusetzen.",
+      ephemeral: true,
+    });
+  }
+
+  const weekCountRaw = interaction.fields.getTextInputValue("weekly_pause_weeks");
+  const weekCount = Number(weekCountRaw);
+  const reason = interaction.fields.getTextInputValue("weekly_pause_reason")?.trim() || "Kein Grund angegeben";
+
+  if (!Number.isInteger(weekCount) || weekCount < 1 || weekCount > 6) {
+    return interaction.reply({
+      content: "❌ Bitte gib bei Wochen eine Zahl von **1 bis 6** ein.",
+      ephemeral: true,
+    });
+  }
+
+  const weekKeys = getWeekKeysFromNow(weekCount);
+  const data = loadData();
+
+  if (!data.weeklyPaymentPauses) data.weeklyPaymentPauses = {};
+
+  for (const weekKey of weekKeys) {
+    data.weeklyPaymentPauses[weekKey] = {
+      weekKey,
+      pausedBy: interaction.user.id,
+      pausedByName: interaction.user.tag,
+      pausedAt: Date.now(),
+      reason,
+    };
+  }
+
+  saveData(data);
+
+  await sendToChannel(CONFIG.weeklyPaymentChannelId, {
+    embeds: [
+      new EmbedBuilder()
+        .setColor(CONFIG.warningColor)
+        .setTitle("💸 WOCHENABGABE AUSGESETZT")
+        .setDescription(
+          [
+            "━━━━━━━━━━━━━━━━━━━━",
+            `👑 **Eingetragen von:** <@${interaction.user.id}>`,
+            `📅 **Ausgesetzte Wochen:**`,
+            formatWeekList(weekKeys),
+            "",
+            `📝 **Grund:** ${reason}`,
+            "",
+            "In diesen Wochen zählt die Wochenabgabe nicht.",
+            "Die Sonntagsübersicht zeigt dann automatisch, dass die Woche ausgesetzt ist.",
+            "━━━━━━━━━━━━━━━━━━━━",
+          ].join("\n")
+        )
+        .setFooter({ text: `${CONFIG.shortName} • Wochenabgabe` }),
+    ],
+    allowedMentions: { users: [interaction.user.id] },
+  });
+
+  return interaction.reply({
+    content: [
+      "✅ Wochenabgabe wurde ausgesetzt.",
+      "",
+      "**Ausgesetzte Wochen:**",
+      formatWeekList(weekKeys),
+    ].join("\n"),
+    ephemeral: true,
+  });
+}
+
+async function showWeeklyPaymentPauses(interaction) {
+  const data = loadData();
+  const pauses = Object.entries(data.weeklyPaymentPauses || {})
+    .sort(([a], [b]) => a.localeCompare(b));
+
+  if (pauses.length === 0) {
+    return interaction.reply({
+      content: "ℹ️ Aktuell sind keine Wochenabgaben ausgesetzt.",
+      ephemeral: true,
+    });
+  }
+
+  const lines = pauses.map(([weekKey, pause]) => {
+    return `• **${weekKey}** — ${pause.reason || "Kein Grund"} — von <@${pause.pausedBy}>`;
+  });
+
+  return interaction.reply({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(CONFIG.warningColor)
+        .setTitle("📋 WOCHENABGABE-AUSSETZUNGEN")
+        .setDescription(lines.join("\n").slice(0, 4000))
+        .setFooter({ text: `${CONFIG.shortName} • Wochenabgabe` }),
+    ],
+    ephemeral: true,
+    allowedMentions: { users: pauses.map(([, pause]) => pause.pausedBy).filter(Boolean).slice(0, 100) },
+  });
+}
+
 function ensureWeeklyPaymentData(data, weekKey = getWeekKey()) {
   if (!data.weeklyPayments) data.weeklyPayments = {};
 
@@ -2422,6 +2602,8 @@ async function handleWeeklyPayment(interaction) {
       "",
       "Wähle aus, für wie viele Wochen du deine Wochenabgabe bezahlt hast.",
       "Du kannst bis zu **6 Wochen** im Voraus bestätigen.",
+      "",
+      "Pausierte Wochen werden automatisch übersprungen.",
     ].join("\n"),
     components: [createWeeklyPaymentSelectRow()],
     ephemeral: true,
@@ -2447,8 +2629,14 @@ async function handleWeeklyPaymentSelection(interaction) {
 
   const newlySavedWeeks = [];
   const alreadyPaidWeeks = [];
+  const pausedWeeks = [];
 
   for (const weekKey of selectedWeekKeys) {
+    if (isWeeklyPaymentPaused(weekKey)) {
+      pausedWeeks.push(weekKey);
+      continue;
+    }
+
     const existingPayment = await getWeeklyPaymentDb(weekKey, interaction.user.id);
 
     if (existingPayment) {
@@ -2470,8 +2658,18 @@ async function handleWeeklyPaymentSelection(interaction) {
   }
 
   if (newlySavedWeeks.length === 0) {
+    const lines = ["ℹ️ Für diese Auswahl musste nichts neu gespeichert werden."];
+
+    if (alreadyPaidWeeks.length > 0) {
+      lines.push("", "**Bereits bezahlt:**", formatWeekList(alreadyPaidWeeks));
+    }
+
+    if (pausedWeeks.length > 0) {
+      lines.push("", "**Ausgesetzt:**", formatWeekList(pausedWeeks));
+    }
+
     return interaction.update({
-      content: `ℹ️ Du hast deine Wochenabgabe für diese Auswahl bereits bestätigt.\n\n**Bereits bezahlt:**\n${formatWeekList(alreadyPaidWeeks)}`,
+      content: lines.join("\n"),
       components: [],
     });
   }
@@ -2715,8 +2913,14 @@ async function manuallyAddWeeklyPayment(interaction) {
 
   const newlySavedWeeks = [];
   const alreadyPaidWeeks = [];
+  const pausedWeeks = [];
 
   for (const weekKey of selectedWeekKeys) {
+    if (isWeeklyPaymentPaused(weekKey)) {
+      pausedWeeks.push(weekKey);
+      continue;
+    }
+
     const existingPayment = await getWeeklyPaymentDb(weekKey, targetUser.id);
 
     if (existingPayment) {
@@ -2738,8 +2942,18 @@ async function manuallyAddWeeklyPayment(interaction) {
   }
 
   if (newlySavedWeeks.length === 0) {
+    const lines = [`ℹ️ Für ${targetUser} musste nichts neu gespeichert werden.`];
+
+    if (alreadyPaidWeeks.length > 0) {
+      lines.push("", "**Bereits bezahlt:**", formatWeekList(alreadyPaidWeeks));
+    }
+
+    if (pausedWeeks.length > 0) {
+      lines.push("", "**Ausgesetzt:**", formatWeekList(pausedWeeks));
+    }
+
     return interaction.reply({
-      content: `ℹ️ Für ${targetUser} war diese Auswahl bereits eingetragen.\n\n**Bereits bezahlt:**\n${formatWeekList(alreadyPaidWeeks)}`,
+      content: lines.join("\n"),
       ephemeral: true,
     });
   }
@@ -2778,6 +2992,10 @@ async function manuallyAddWeeklyPayment(interaction) {
     replyLines.push("", "**Bereits vorher bezahlt:**", formatWeekList(alreadyPaidWeeks));
   }
 
+  if (pausedWeeks.length > 0) {
+    replyLines.push("", "**Ausgesetzt / zählt nicht:**", formatWeekList(pausedWeeks));
+  }
+
   return interaction.reply({
     content: replyLines.join("\n"),
     ephemeral: true,
@@ -2785,6 +3003,27 @@ async function manuallyAddWeeklyPayment(interaction) {
 }
 
 async function postWeeklyPaymentOverview(reason = "scheduled") {
+  const weekKey = getWeekKey();
+  const pause = getWeeklyPaymentPause(weekKey);
+
+  if (pause) {
+    await sendToChannel(CONFIG.weeklyPaymentChannelId, {
+      embeds: [createWeeklyPaymentPausedEmbed(weekKey, pause)],
+      allowedMentions: { users: [pause.pausedBy].filter(Boolean) },
+    });
+
+    await saveWeeklySummaryDb({
+      weekKey,
+      postedAt: Date.now(),
+      reason: `paused:${reason}`,
+      paidCount: 0,
+      unpaidCount: 0,
+    });
+
+    console.log(`ℹ️ Wochenabgabe-Übersicht für ${weekKey} wurde übersprungen, weil die Woche ausgesetzt ist.`);
+    return;
+  }
+
   const guild = await client.guilds.fetch(process.env.GUILD_ID).catch(() => null);
 
   if (!guild) {
@@ -2792,7 +3031,6 @@ async function postWeeklyPaymentOverview(reason = "scheduled") {
     return;
   }
 
-  const weekKey = getWeekKey();
   const weekData = await getWeeklyPaymentsForWeekDb(weekKey);
 
   const payers = await getPayerMembers(guild);
@@ -4031,6 +4269,32 @@ client.on("interactionCreate", async (interaction) => {
     // -------------------------------
     // Leaderpanel / Sanktionen
     // -------------------------------
+
+    if (interaction.isButton() && interaction.customId === "leader_weekly_pause") {
+      if (!hasLeaderPermission(interaction.member)) {
+        return interaction.reply({
+          content: "❌ Du hast keine Berechtigung, die Wochenabgabe auszusetzen.",
+          ephemeral: true,
+        });
+      }
+
+      return interaction.showModal(createWeeklyPaymentPauseModal());
+    }
+
+    if (interaction.isButton() && interaction.customId === "leader_weekly_pause_show") {
+      if (!hasLeaderPermission(interaction.member)) {
+        return interaction.reply({
+          content: "❌ Du hast keine Berechtigung, die Wochenabgabe-Aussetzungen anzusehen.",
+          ephemeral: true,
+        });
+      }
+
+      return showWeeklyPaymentPauses(interaction);
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === "weekly_pause_modal") {
+      return handleWeeklyPaymentPauseModal(interaction);
+    }
 
     if (
       (interaction.isButton() && interaction.customId.startsWith("leader_")) ||
