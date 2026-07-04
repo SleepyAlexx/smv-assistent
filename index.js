@@ -1,3 +1,4 @@
+// UPDATE: Neuer Abmeldungs-Channel auf 1522813672244908135 gesetzt.
 // UPDATE: /clean Anzahl löscht Nachrichten im aktuellen Channel.
 // UPDATE: Satz 'Die Sonntagsübersicht zählt diese Wochen nicht als offen.' wurde aus der WA-Ausgesetzt-Nachricht entfernt.
 // UPDATE: WA-Aussetzen läuft jetzt sauber über Dropdown 1–6 Wochen, Weiter-Button und danach Grund-Fenster.
@@ -124,7 +125,7 @@ const CONFIG = {
   footballEventChannelId: "1451331983459356836",
 
   // Familienpanel / Abmeldung
-  absenceChannelId: "1434318024076296326",
+  absenceChannelId: "1522813672244908135",
 
   // Wochenabgabe / Zahlende/r Rollenautomatik
   familyMemberRoleId: "1451314176004984912",
