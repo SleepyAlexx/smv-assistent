@@ -1,3 +1,4 @@
+// UPDATE: WA-Aussetzen läuft jetzt sauber über Dropdown 1–6 Wochen, Weiter-Button und danach Grund-Fenster.
 // UPDATE: WA-Aussetzungen zeigen jetzt zu jeder KW auch den Datumsbereich von Montag bis Sonntag.
 // UPDATE: WA-Aussetzungs-/Aktiv-Nachrichten gehen in Channel 1522805016128262155 und pingen die SMV-Rolle.
 // UPDATE: WA-Aussetzungen können jetzt wieder rückgängig gemacht werden.
@@ -2171,19 +2172,68 @@ function createWeeklyPaymentManageMenu() {
   );
 }
 
-function createWeeklyPaymentPauseModal() {
-  const modal = new ModalBuilder()
-    .setCustomId("weekly_pause_modal")
-    .setTitle("💸 Wochenabgabe aussetzen");
+function createWeeklyPauseWeeksSelectRow() {
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("weekly_pause_weeks_select")
+      .setPlaceholder("Wie lange soll die Wochenabgabe ausfallen?")
+      .setMinValues(1)
+      .setMaxValues(1)
+      .addOptions(
+        {
+          label: "1 Woche",
+          description: "Die aktuelle Woche wird ausgesetzt",
+          value: "1",
+          emoji: "1️⃣",
+        },
+        {
+          label: "2 Wochen",
+          description: "Aktuelle Woche + nächste Woche",
+          value: "2",
+          emoji: "2️⃣",
+        },
+        {
+          label: "3 Wochen",
+          description: "Aktuelle Woche + 2 weitere Wochen",
+          value: "3",
+          emoji: "3️⃣",
+        },
+        {
+          label: "4 Wochen",
+          description: "Aktuelle Woche + 3 weitere Wochen",
+          value: "4",
+          emoji: "4️⃣",
+        },
+        {
+          label: "5 Wochen",
+          description: "Aktuelle Woche + 4 weitere Wochen",
+          value: "5",
+          emoji: "5️⃣",
+        },
+        {
+          label: "6 Wochen",
+          description: "Aktuelle Woche + 5 weitere Wochen",
+          value: "6",
+          emoji: "6️⃣",
+        }
+      )
+  );
+}
 
-  const weeksInput = new TextInputBuilder()
-    .setCustomId("weekly_pause_weeks")
-    .setLabel("Wie viele Wochen?")
-    .setPlaceholder("1 bis 6")
-    .setStyle(TextInputStyle.Short)
-    .setMinLength(1)
-    .setMaxLength(1)
-    .setRequired(true);
+function createWeeklyPauseNextButtonRow(weekCount) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`weekly_pause_reason_next_${weekCount}`)
+      .setLabel("Weiter")
+      .setEmoji("➡️")
+      .setStyle(ButtonStyle.Primary)
+  );
+}
+
+function createWeeklyPaymentPauseModal(weekCount) {
+  const modal = new ModalBuilder()
+    .setCustomId(`weekly_pause_reason_modal_${weekCount}`)
+    .setTitle("💸 Grund eintragen");
 
   const reasonInput = new TextInputBuilder()
     .setCustomId("weekly_pause_reason")
@@ -2195,7 +2245,6 @@ function createWeeklyPaymentPauseModal() {
     .setRequired(false);
 
   modal.addComponents(
-    new ActionRowBuilder().addComponents(weeksInput),
     new ActionRowBuilder().addComponents(reasonInput)
   );
 
@@ -2232,13 +2281,13 @@ async function handleWeeklyPaymentPauseModal(interaction) {
     });
   }
 
-  const weekCountRaw = interaction.fields.getTextInputValue("weekly_pause_weeks");
+  const weekCountRaw = interaction.customId.replace("weekly_pause_reason_modal_", "");
   const weekCount = Number(weekCountRaw);
   const reason = interaction.fields.getTextInputValue("weekly_pause_reason")?.trim() || "Kein Grund angegeben";
 
   if (!Number.isInteger(weekCount) || weekCount < 1 || weekCount > 6) {
     return interaction.reply({
-      content: "❌ Bitte gib bei Wochen eine Zahl von **1 bis 6** ein.",
+      content: "❌ Ungültige Wochenanzahl. Bitte starte den Vorgang nochmal.",
       ephemeral: true,
     });
   }
@@ -4504,7 +4553,15 @@ client.on("interactionCreate", async (interaction) => {
       const selectedAction = interaction.values[0];
 
       if (selectedAction === "pause") {
-        return interaction.showModal(createWeeklyPaymentPauseModal());
+        return interaction.update({
+          content: [
+            "💸 **Wochenabgabe aussetzen**",
+            "",
+            "Wähle zuerst aus, wie lange die Wochenabgabe ausfallen soll.",
+            "Danach klickst du auf **Weiter** und trägst den Grund ein.",
+          ].join("\n"),
+          components: [createWeeklyPauseWeeksSelectRow()],
+        });
       }
 
       if (selectedAction === "show") {
@@ -4526,7 +4583,48 @@ client.on("interactionCreate", async (interaction) => {
       return removeWeeklyPaymentPause(interaction, weekKey);
     }
 
-    if (interaction.isModalSubmit() && interaction.customId === "weekly_pause_modal") {
+    if (interaction.isStringSelectMenu() && interaction.customId === "weekly_pause_weeks_select") {
+      if (!hasLeaderPermission(interaction.member)) {
+        return interaction.reply({
+          content: "❌ Du hast keine Berechtigung, die Wochenabgabe zu verwalten.",
+          ephemeral: true,
+        });
+      }
+
+      const weekCount = Math.min(Math.max(Number(interaction.values[0]) || 1, 1), 6);
+      const weekKeys = getWeekKeysFromNow(weekCount);
+
+      return interaction.update({
+        content: [
+          "💸 **Wochenabgabe aussetzen**",
+          "",
+          `✅ Ausgewählt: **${weekCount} ${weekCount === 1 ? "Woche" : "Wochen"}**`,
+          "",
+          "**Betroffene Wochen:**",
+          formatWeekListWithDateRanges(weekKeys),
+          "",
+          "Klicke auf **Weiter**, um den Grund einzutragen.",
+        ].join("\n"),
+        components: [
+          createWeeklyPauseWeeksSelectRow(),
+          createWeeklyPauseNextButtonRow(weekCount),
+        ],
+      });
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith("weekly_pause_reason_next_")) {
+      if (!hasLeaderPermission(interaction.member)) {
+        return interaction.reply({
+          content: "❌ Du hast keine Berechtigung, die Wochenabgabe zu verwalten.",
+          ephemeral: true,
+        });
+      }
+
+      const weekCount = Math.min(Math.max(Number(interaction.customId.replace("weekly_pause_reason_next_", "")) || 1, 1), 6);
+      return interaction.showModal(createWeeklyPaymentPauseModal(weekCount));
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId.startsWith("weekly_pause_reason_modal_")) {
       return handleWeeklyPaymentPauseModal(interaction);
     }
 
