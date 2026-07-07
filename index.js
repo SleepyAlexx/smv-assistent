@@ -1,3 +1,4 @@
+// UPDATE: Aufstellung Mittwoch und Sonntag jetzt standardmäßig um 19:30 Uhr; andere Tage bleiben 20:30 Uhr.
 // UPDATE: Abmeldungen werden jetzt erst 7 Tage nach dem Bis-Datum um 00 Uhr automatisch gelöscht.
 // UPDATE: Neuer Abmeldungs-Channel auf 1522813672244908135 gesetzt.
 // UPDATE: /clean Anzahl löscht Nachrichten im aktuellen Channel.
@@ -115,7 +116,11 @@ const CONFIG = {
   lineupChannelId: "1451318638601830550",
   timezone: "Europe/Berlin",
   lineupStartTimeText: "20:30 - 21:00",
-  lineupEventStartText: "jeden Tag um 20:30 Uhr",
+  lineupSpecialStartTimes: {
+    Mittwoch: "19:30 - 20:00",
+    Sonntag: "19:30 - 20:00",
+  },
+  lineupEventStartText: "Mi. & So. um 19:30 Uhr, sonst um 20:30 Uhr",
 
   // Sanktionen
   sanctionChannelId: "1434318024646856758",
@@ -828,8 +833,19 @@ function getLineupHeadline(lineup) {
   return `# 🐻 SMV ${String(title).toUpperCase()}`;
 }
 
+function getDefaultLineupStartText(weekday) {
+  return CONFIG.lineupSpecialStartTimes?.[weekday] || CONFIG.lineupStartTimeText;
+}
+
 function getLineupStartText(lineup) {
-  return lineup.startTimeText || CONFIG.lineupStartTimeText;
+  // Wenn keine Uhrzeit manuell geändert wurde, zählt der Standard nach Wochentag.
+  // Mittwoch und Sonntag: 19:30 - 20:00
+  // Andere Aufstellungstage: 20:30 - 21:00
+  if (!lineup?.lastTimeChangeBy) {
+    return getDefaultLineupStartText(lineup?.weekday);
+  }
+
+  return lineup.startTimeText || getDefaultLineupStartText(lineup?.weekday);
 }
 
 function parseLineupStartMinutes(startText) {
@@ -872,7 +888,7 @@ function createEmptyLineup(dateKey, dateText, weekday, createdBy = null) {
     dateText,
     weekday,
     title: getLineupTitle(weekday),
-    startTimeText: CONFIG.lineupStartTimeText,
+    startTimeText: getDefaultLineupStartText(weekday),
     createdBy,
     createdAt: Date.now(),
     closed: false,
