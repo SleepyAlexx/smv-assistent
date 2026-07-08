@@ -1,72 +1,11 @@
-// UPDATE: Tagesprotokoll wird jetzt in Channel 1524251646664900658 gepostet.
-// UPDATE: Tagesprotokoll, /smv-status, /abmeldungen, /aufstellung-morgen, Zahlungs-Remove-Schutz und Auto-Lösch-Logs eingebaut.
-// UPDATE: Verbesserungen eingebaut: Abmeldungs-Scan, WA-Status, Aufstellungs-Hinweis, 30-Minuten-Erinnerung und Sicherheitsabfragen.
-// UPDATE: Aufstellung Mittwoch und Sonntag jetzt standardmäßig um 19:30 Uhr; andere Tage bleiben 20:30 Uhr.
-// UPDATE: Abmeldungen werden jetzt erst 7 Tage nach dem Bis-Datum um 00 Uhr automatisch gelöscht.
-// UPDATE: Neuer Abmeldungs-Channel auf 1522813672244908135 gesetzt.
-// UPDATE: /clean Anzahl löscht Nachrichten im aktuellen Channel.
-// UPDATE: Satz 'Die Sonntagsübersicht zählt diese Wochen nicht als offen.' wurde aus der WA-Ausgesetzt-Nachricht entfernt.
-// UPDATE: WA-Aussetzen läuft jetzt sauber über Dropdown 1–6 Wochen, Weiter-Button und danach Grund-Fenster.
-// UPDATE: WA-Aussetzungen zeigen jetzt zu jeder KW auch den Datumsbereich von Montag bis Sonntag.
-// UPDATE: WA-Aussetzungs-/Aktiv-Nachrichten gehen in Channel 1522805016128262155 und pingen die SMV-Rolle.
-// UPDATE: WA-Aussetzungen können jetzt wieder rückgängig gemacht werden.
-// UPDATE: WA-Button ist jetzt 'WA verwalten' mit Auswahl für Aussetzen oder aktive Aussetzungen ansehen.
-// UPDATE: Leaderpanel hat nur noch einen blauen WA-Button zum Aussetzen; der extra WA-Aussetzungen-Button wurde entfernt.
-// UPDATE: Wochenabgabe kann durch Leader für 1–6 Wochen ausgesetzt werden; pausierte Wochen zählen nicht in der Übersicht.
-// UPDATE: Leave-Nachricht pingt den User jetzt mit @, damit man direkt sieht wer geleavt ist.
-// UPDATE: Abmeldungen werden nur um 00 Uhr geprüft und gelöscht; Bis-Datum wird im Format TT.MM.JJJJ erkannt.
-// UPDATE: Abmeldungen werden automatisch 7 Tage nach dem Bis-Datum gelöscht.
-// FIX: Fehler bei /aufstellung-test und /aufstellung-erzwingen behoben: alte unsureUsers-Referenz in Aufstellung entfernt.
-// FIX: Manueller Slash-Command /aufstellung-erzwingen eingebaut, der die heutige Aufstellung wirklich neu postet.
-// FIX: Aufstellungsprüfung erstellt neu, wenn postedDates für heute existiert, aber die Discord-Nachricht fehlt.
-// UPDATE: Ungewiss bei Aufstellungen komplett entfernt; nur noch Anwesend oder Abwesend.
-// UPDATE: Bot-Status auf Made by Kquwi☦︎ gesetzt.
-// UPDATE: Fußball-Event jetzt mit 2-Spalten-Design und Button zum Wiederöffnen nach versehentlicher Absage.
-// UPDATE: Aufstellung jetzt mit 2-Spalten-Design und Button zum Wiederöffnen nach versehentlicher Absage.
 // =====================================================
-// SMV-Assistent | Komplettscript
-// Registrierung + Join/Leave + Aufstellung + Leaderpanel/Sanktionen + Fußball-Events + Familienpanel + Wochenabgabe
+// SMV-Assistent | index.js
+// Registrierung + Aufstellung + Sanktionen + Fußball + Wochenabgabe + Abmeldungen
 //
-// Datei: index.js
-//
-// WICHTIG:
-// Für Join/Leave, Nicknames, Rollen und Member-Infos brauchst du:
-// Discord Developer Portal -> Bot -> Privileged Gateway Intents
-// ✅ Server Members Intent aktivieren
-//
-// Bot-Rechte auf Discord:
-// ✅ Administrator reicht grundsätzlich
-// ABER: Bot-Rolle muss über den Rollen stehen, die er vergeben soll.
-// ABER: Bot-Rolle muss über User-Rollen stehen, deren Nickname er ändern soll.
-//
-// FIX: Sanktionen aus derselben Kategorie werden gesammelt und nicht ersetzt.
-// UPDATE: Sanktionen können jetzt storniert/gelöscht werden.
-// UPDATE: Leader-Logs wurden schöner formatiert.
-// UPDATE: Überschrift ist jetzt 🚫 SANKTION 🚫.
-// UPDATE: Fußball-Events sind jetzt im Familienpanel eingebaut und aus dem Leaderpanel entfernt.
-// UPDATE: Aufstellungen markieren jetzt die SMV-Rolle; Fußball-Events markieren weiterhin @everyone.
-// UPDATE: Fußball-Event-Formular wurde schöner benannt.
-// UPDATE: ❌-Buttons bei Aufstellung und Fußball sind jetzt grau statt rot.
-// UPDATE: Familienpanel mit Abmeldung eingebaut.
-// UPDATE: Zahlende/r-Rolle wird automatisch verwaltet.
-// UPDATE: Beim Bot-Start werden bestehende Mitglieder automatisch geprüft.
-// UPDATE: Wochenabgabe-System mit Button, Logs, Korrektur und Sonntagsübersicht eingebaut.
-// HINWEIS: Der automatische Zahlende/r-Start-Sync bleibt bewusst als Sicherheitsnetz drin.
-// UPDATE: Wunsch/Vorschlag-Button wurde entfernt.
-// UPDATE: Wochenabgabe-Logs zeigen jetzt den Discord-Namen und deutsche Zeitangaben.
-// UPDATE: Sonntagsübersicht zeigt ebenfalls Namen und deutsche Zeitangaben.
-// FIX: Wochenabgabe-Logs zeigen immer einen lesbaren Usernamen statt nur <@ID>.
-// UPDATE: Wochenabgabe kann jetzt für 1 bis 6 Wochen im Voraus bestätigt werden.
-// UPDATE: Abmeldungs-Embed wurde schöner und übersichtlicher gestaltet.
-// UPDATE: Fußball-Event-Button im Familienpanel ist nur für die freigegebenen Rollen nutzbar.
-// UPDATE: Fußball-Event steht im Familienpanel jetzt vor der Wochenabgabe.
-// UPDATE: Aufstellungsdesign, Schließzeit, Absage-Button und Uhrzeit-Änderung eingebaut.
-//
-// Leader/Sanktionsrechte:
-// Nur User mit einer dieser Rollen dürfen Sanktionen erstellen/bezahlt markieren:
-// 1451315550394515516
-// 1434318021412786317
-// 1451629804221894868
+// Hinweise:
+// - Discord Developer Portal -> Privileged Gateway Intents -> Server Members Intent aktivieren.
+// - Bot-Rolle muss über allen Rollen stehen, die der Bot vergeben oder bearbeiten soll.
+// - DATABASE_URL wird für Wochenabgabe/Speicherfunktionen genutzt.
 // =====================================================
 
 require("dotenv").config();
@@ -129,6 +68,7 @@ const CONFIG = {
   sanctionChannelId: "1434318024646856758",
   sanctionLogChannelId: "1508286380403589131",
   dailyReportChannelId: "1524251646664900658",
+  errorLogChannelId: "1524252653922816102",
   sanctionDueDays: 7,
 
   // Fußball-Event-Channel
@@ -366,6 +306,7 @@ function getDefaultData() {
     weeklyPaymentPauses: {},
     lineupReminders: {},
     dailyReports: {},
+    healthChecks: {},
     absences: {},
   };
 }
@@ -397,6 +338,7 @@ function loadData() {
       weeklyPaymentPauses: data.weeklyPaymentPauses || {},
       lineupReminders: data.lineupReminders || {},
       dailyReports: data.dailyReports || {},
+      healthChecks: data.healthChecks || {},
       absences: data.absences || {},
     };
   } catch (error) {
@@ -2067,7 +2009,6 @@ async function checkOverdueSanctions() {
 }
 
 
-
 // =====================================================
 // FAMILIENPANEL / ABMELDUNG
 // =====================================================
@@ -2364,8 +2305,6 @@ async function scanExistingAbsences(interaction) {
     ephemeral: true,
   });
 }
-
-
 
 
 // =====================================================
@@ -3759,7 +3698,6 @@ async function checkWeeklyPaymentSummary() {
 }
 
 
-
 // =====================================================
 // FUẞBALL-EVENTS
 // =====================================================
@@ -4346,6 +4284,126 @@ async function showSmvStatus(interaction) {
   });
 }
 
+async function sendErrorLog(title, error, extraLines = []) {
+  const errorText = error?.stack || error?.message || String(error || "Unbekannter Fehler");
+
+  await sendToChannel(CONFIG.errorLogChannelId, {
+    embeds: [
+      new EmbedBuilder()
+        .setColor(CONFIG.dangerColor)
+        .setTitle(`❌ ${title}`)
+        .setDescription(
+          [
+            "━━━━━━━━━━━━━━━━━━━━",
+            ...extraLines,
+            `🕘 **Zeitpunkt:** ${formatGermanDateTimeFromMs(Date.now())}`,
+            "",
+            "**Fehler:**",
+            "```txt",
+            truncate(errorText, 1500),
+            "```",
+            "━━━━━━━━━━━━━━━━━━━━",
+          ].filter(Boolean).join("\n")
+        )
+        .setFooter({ text: `${CONFIG.shortName} • Fehlerlog` }),
+    ],
+  }).catch(() => {});
+}
+
+async function postHealthCheck(reason = "scheduled") {
+  const now = getBerlinParts();
+
+  // Einmal täglich ab 12 Uhr posten.
+  if (Number(now.hour) < 12) return;
+
+  const data = loadData();
+  if (!data.healthChecks) data.healthChecks = {};
+  if (data.healthChecks[now.dateKey]) return;
+
+  let databaseOk = "Nicht aktiv";
+  try {
+    if (dbPool) {
+      await dbQuery("SELECT NOW()");
+      databaseOk = "Verbunden";
+    }
+  } catch (error) {
+    databaseOk = "Fehler";
+    await sendErrorLog("Datenbank-Healthcheck fehlgeschlagen", error);
+  }
+
+  await sendToChannel(CONFIG.errorLogChannelId, {
+    embeds: [
+      new EmbedBuilder()
+        .setColor(CONFIG.successColor)
+        .setTitle("✅ SMV HEALTHCHECK")
+        .setDescription(
+          [
+            "━━━━━━━━━━━━━━━━━━━━",
+            `🤖 **Bot:** Läuft`,
+            `🗄️ **Datenbank:** ${databaseOk}`,
+            `⏱️ **Scheduler:** Aktiv`,
+            `📅 **Datum:** ${now.weekday}, ${now.dateText}`,
+            `🕘 **Letzter Check:** ${formatGermanDateTimeFromMs(Date.now())}`,
+            "",
+            `📝 **Grund:** ${reason}`,
+            "━━━━━━━━━━━━━━━━━━━━",
+          ].join("\n")
+        )
+        .setFooter({ text: `${CONFIG.shortName} • Healthcheck` }),
+    ],
+  });
+
+  data.healthChecks[now.dateKey] = {
+    postedAt: new Date().toISOString(),
+    reason,
+    databaseOk,
+  };
+
+  saveData(data);
+}
+
+async function showHelp(interaction) {
+  const embed = new EmbedBuilder()
+    .setColor(CONFIG.embedColor)
+    .setTitle("🐻 SMV HILFE")
+    .setDescription(
+      [
+        "━━━━━━━━━━━━━━━━━━━━",
+        "**📋 Allgemein / Übersicht**",
+        "`/smv-status` — zeigt den Gesamtstatus",
+        "`/hilfe` — zeigt diese Übersicht",
+        "",
+        "**📋 Aufstellung**",
+        "`/aufstellung-erzwingen` — heutige Aufstellung neu posten",
+        "`/aufstellung-morgen` — Aufstellung für morgen posten",
+        "`/aufstellung-test` — heutige Aufstellung testen/posten",
+        "",
+        "**💸 Wochenabgabe**",
+        "`/wa-status` — aktuelle WA anzeigen",
+        "`/wochenabgabe-uebersicht` — WA-Übersicht manuell posten",
+        "`/wochenabgabe-eintragen` — WA manuell eintragen",
+        "",
+        "**📋 Abmeldungen**",
+        "`/abmeldungen` — aktive Abmeldungen anzeigen",
+        "`/abmeldungen-scan` — alte Abmeldungen nachträglich speichern",
+        "",
+        "**🛠️ Verwaltung**",
+        "`/leaderpanel` — Leaderpanel senden",
+        "`/familienpanel` — Familienpanel senden",
+        "`/registrierpanel` — Registrierungspanel senden",
+        "`/zahlende-sync` — Zahlende/r-Rollen prüfen",
+        "`/clean` — Nachrichten löschen",
+        "━━━━━━━━━━━━━━━━━━━━",
+      ].join("\n")
+    )
+    .setFooter({ text: `${CONFIG.shortName} • Hilfe` });
+
+  return interaction.reply({
+    embeds: [embed],
+    ephemeral: true,
+  });
+}
+
 async function postDailyReport(reason = "scheduled") {
   const now = getBerlinParts();
 
@@ -4490,6 +4548,12 @@ function startSchedulers() {
 
   postDailyReport("Bot-Start-Prüfung").catch((error) => {
     console.error("❌ Fehler bei erster Tagesprotokoll-Prüfung:", error);
+    sendErrorLog("Tagesprotokoll-Prüfung fehlgeschlagen", error);
+  });
+
+  postHealthCheck("Bot-Start-Prüfung").catch((error) => {
+    console.error("❌ Fehler bei erster Healthcheck-Prüfung:", error);
+    sendErrorLog("Healthcheck-Prüfung fehlgeschlagen", error);
   });
 
   // Jede Minute prüfen.
@@ -4520,6 +4584,12 @@ function startSchedulers() {
 
     postDailyReport("Automatisch").catch((error) => {
       console.error("❌ Fehler bei Tagesprotokoll-Prüfung:", error);
+      sendErrorLog("Tagesprotokoll-Prüfung fehlgeschlagen", error);
+    });
+
+    postHealthCheck("Automatisch").catch((error) => {
+      console.error("❌ Fehler bei Healthcheck-Prüfung:", error);
+      sendErrorLog("Healthcheck-Prüfung fehlgeschlagen", error);
     });
   }, 60 * 1000);
 
@@ -4532,6 +4602,12 @@ function startSchedulers() {
 
 async function registerCommands() {
   const commands = [
+    new SlashCommandBuilder()
+      .setName("hilfe")
+      .setDescription("Zeigt alle wichtigen SMV-Bot Befehle")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .toJSON(),
+
     new SlashCommandBuilder()
       .setName("registrierpanel")
       .setDescription("Sendet das SMV Registrierungspanel")
@@ -4656,6 +4732,23 @@ async function registerCommands() {
 client.once("clientReady", async () => {
   console.log(`✅ ${CONFIG.botName} ist online als ${client.user.tag}`);
 
+  await sendToChannel(CONFIG.errorLogChannelId, {
+    embeds: [
+      new EmbedBuilder()
+        .setColor(CONFIG.successColor)
+        .setTitle("✅ SMV-ASSISTENT ONLINE")
+        .setDescription(
+          [
+            "━━━━━━━━━━━━━━━━━━━━",
+            `🤖 **Bot:** ${client.user.tag}`,
+            `🕘 **Gestartet:** ${formatGermanDateTimeFromMs(Date.now())}`,
+            "━━━━━━━━━━━━━━━━━━━━",
+          ].join("\n")
+        )
+        .setFooter({ text: `${CONFIG.shortName} • Botlog` }),
+    ],
+  }).catch(() => {});
+
   client.user.setPresence({
     status: "online",
     activities: [
@@ -4742,6 +4835,10 @@ client.on("interactionCreate", async (interaction) => {
     // -------------------------------
     // Slash Commands
     // -------------------------------
+
+    if (interaction.isChatInputCommand() && interaction.commandName === "hilfe") {
+      return showHelp(interaction);
+    }
 
     if (interaction.isChatInputCommand() && interaction.commandName === "registrierpanel") {
       const embed = createRegisterPanelEmbed();
@@ -5081,20 +5178,12 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.isButton() && interaction.customId.startsWith("lineup_cancel_confirm_")) {
       const dateKey = interaction.customId.replace("lineup_cancel_confirm_", "");
-      await interaction.update({
-        content: "⏳ Aufstellung wird abgesagt ...",
-        components: [],
-      });
-      return cancelLineup(interaction, dateKey, true);
+      return cancelLineup(interaction, dateKey);
     }
 
     if (interaction.isButton() && interaction.customId.startsWith("lineup_reopen_confirm_")) {
       const dateKey = interaction.customId.replace("lineup_reopen_confirm_", "");
-      await interaction.update({
-        content: "⏳ Aufstellung wird wieder geöffnet ...",
-        components: [],
-      });
-      return reopenLineup(interaction, dateKey, true);
+      return reopenLineup(interaction, dateKey);
     }
 
     if (interaction.isButton() && interaction.customId.startsWith("lineup_cancel_")) {
@@ -5632,8 +5721,14 @@ client.on("interactionCreate", async (interaction) => {
       stack: error?.stack,
     });
 
+    await sendErrorLog("Fehler bei einer Interaction", error, [
+      interaction?.commandName ? `⚙️ **Command:** /${interaction.commandName}` : null,
+      interaction?.customId ? `🔘 **CustomId:** ${interaction.customId}` : null,
+      interaction?.user ? `👤 **User:** <@${interaction.user.id}>` : null,
+    ].filter(Boolean)).catch(() => {});
+
     const errorMessage =
-      "❌ Es ist ein Fehler passiert. Prüfe bitte die Bot-Rechte, Rollen-Reihenfolge und Railway-Logs.";
+      "❌ Es ist ein Fehler passiert. Der Fehler wurde im Fehler-Log gespeichert.";
 
     if (interaction.replied || interaction.deferred) {
       return interaction.followUp({
@@ -5655,10 +5750,12 @@ client.on("interactionCreate", async (interaction) => {
 
 process.on("unhandledRejection", (error) => {
   console.error("❌ Unhandled Rejection:", error);
+  sendErrorLog("Unhandled Rejection", error).catch(() => {});
 });
 
 process.on("uncaughtException", (error) => {
   console.error("❌ Uncaught Exception:", error);
+  sendErrorLog("Uncaught Exception", error).catch(() => {});
 });
 
 // =====================================================
