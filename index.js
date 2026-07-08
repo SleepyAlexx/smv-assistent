@@ -1,6 +1,6 @@
 // =====================================================
 // SMV-Assistent | index.js
-// Registrierung + Aufstellung + Sanktionen + Fußball + Wochenabgabe + Abmeldungen
+// Registrierung + Aufstellung + Sanktionen + Fußball + Wochenabgabe + Abmeldungen + Backups
 //
 // Hinweise:
 // - Discord Developer Portal -> Privileged Gateway Intents -> Server Members Intent aktivieren.
@@ -69,6 +69,7 @@ const CONFIG = {
   sanctionLogChannelId: "1508286380403589131",
   dailyReportChannelId: "1524251646664900658",
   errorLogChannelId: "1524252653922816102",
+  backupLogChannelId: "1524252653922816102",
   sanctionDueDays: 7,
 
   // Fußball-Event-Channel
@@ -294,6 +295,7 @@ async function initDatabase() {
 
 const DATA_DIR = path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "smv-data.json");
+const BACKUP_DIR = path.join(DATA_DIR, "backups");
 
 function getDefaultData() {
   return {
@@ -307,6 +309,7 @@ function getDefaultData() {
     lineupReminders: {},
     dailyReports: {},
     healthChecks: {},
+    backups: {},
     absences: {},
   };
 }
@@ -314,6 +317,10 @@ function getDefaultData() {
 function ensureDataFile() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+
+  if (!fs.existsSync(BACKUP_DIR)) {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
   }
 
   if (!fs.existsSync(DATA_FILE)) {
@@ -339,6 +346,7 @@ function loadData() {
       lineupReminders: data.lineupReminders || {},
       dailyReports: data.dailyReports || {},
       healthChecks: data.healthChecks || {},
+      backups: data.backups || {},
       absences: data.absences || {},
     };
   } catch (error) {
@@ -4392,6 +4400,7 @@ async function showHelp(interaction) {
         "`/familienpanel` — Familienpanel senden",
         "`/registrierpanel` — Registrierungspanel senden",
         "`/zahlende-sync` — Zahlende/r-Rollen prüfen",
+        "`/backup` — manuelles Backup erstellen",
         "`/clean` — Nachrichten löschen",
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
@@ -4400,6 +4409,120 @@ async function showHelp(interaction) {
 
   return interaction.reply({
     embeds: [embed],
+    ephemeral: true,
+  });
+}
+
+function getSafeBackupFileName(dateKey) {
+  return `smv-backup-${String(dateKey || "unknown").replace(/[^0-9-]/g, "")}.json`;
+}
+
+function cleanupOldBackups(maxFiles = 14) {
+  ensureDataFile();
+
+  const files = fs.readdirSync(BACKUP_DIR)
+    .filter((file) => file.startsWith("smv-backup-") && file.endsWith(".json"))
+    .map((file) => ({
+      file,
+      path: path.join(BACKUP_DIR, file),
+      mtimeMs: fs.statSync(path.join(BACKUP_DIR, file)).mtimeMs,
+    }))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+  for (const oldFile of files.slice(maxFiles)) {
+    fs.unlinkSync(oldFile.path);
+  }
+
+  return files.length;
+}
+
+async function createDailyBackup(reason = "scheduled", force = false) {
+  const now = getBerlinParts();
+  const data = loadData();
+
+  if (!data.backups) data.backups = {};
+  if (!force && data.backups[now.dateKey]) return null;
+
+  ensureDataFile();
+
+  const backupFileName = getSafeBackupFileName(now.dateKey);
+  const backupPath = path.join(BACKUP_DIR, backupFileName);
+
+  const backupPayload = {
+    createdAt: new Date().toISOString(),
+    createdAtText: formatGermanDateTimeFromMs(Date.now()),
+    reason,
+    bot: CONFIG.botName,
+    data,
+  };
+
+  fs.writeFileSync(backupPath, JSON.stringify(backupPayload, null, 2));
+
+  const fileSizeKb = Math.max(1, Math.round(fs.statSync(backupPath).size / 1024));
+  const backupCountBeforeCleanup = cleanupOldBackups(14);
+
+  data.backups[now.dateKey] = {
+    fileName: backupFileName,
+    createdAt: new Date().toISOString(),
+    reason,
+    fileSizeKb,
+  };
+
+  saveData(data);
+
+  await sendToChannel(CONFIG.backupLogChannelId, {
+    embeds: [
+      new EmbedBuilder()
+        .setColor(CONFIG.successColor)
+        .setTitle("💾 SMV BACKUP ERSTELLT")
+        .setDescription(
+          [
+            "━━━━━━━━━━━━━━━━━━━━",
+            `📁 **Datei:** \`${backupFileName}\``,
+            `📦 **Größe:** ca. ${fileSizeKb} KB`,
+            `🕘 **Zeitpunkt:** ${formatGermanDateTimeFromMs(Date.now())}`,
+            `📝 **Grund:** ${reason}`,
+            "",
+            "Es werden automatisch nur die letzten **14 Backups** behalten.",
+            `📚 **Backups vorher im Ordner:** ${backupCountBeforeCleanup}`,
+            "━━━━━━━━━━━━━━━━━━━━",
+          ].join("\n")
+        )
+        .setFooter({ text: `${CONFIG.shortName} • Backup` }),
+    ],
+  });
+
+  return backupPath;
+}
+
+async function checkDailyBackup(reason = "scheduled") {
+  const now = getBerlinParts();
+
+  // Einmal täglich ab 03 Uhr sichern.
+  if (Number(now.hour) < 3) return;
+
+  await createDailyBackup(reason, false);
+}
+
+async function createManualBackup(interaction) {
+  if (!hasLeaderPermission(interaction.member)) {
+    return interaction.reply({
+      content: "❌ Du hast keine Berechtigung für diesen Befehl.",
+      ephemeral: true,
+    });
+  }
+
+  await interaction.reply({
+    content: "💾 Backup wird erstellt ...",
+    ephemeral: true,
+  });
+
+  const backupPath = await createDailyBackup(`Manuell von ${interaction.user.tag}`, true);
+
+  return interaction.followUp({
+    content: backupPath
+      ? "✅ Backup wurde erstellt und im Backup-Log gepostet."
+      : "ℹ️ Backup wurde heute bereits automatisch erstellt.",
     ephemeral: true,
   });
 }
@@ -4556,6 +4679,11 @@ function startSchedulers() {
     sendErrorLog("Healthcheck-Prüfung fehlgeschlagen", error);
   });
 
+  checkDailyBackup("Bot-Start-Prüfung").catch((error) => {
+    console.error("❌ Fehler bei erster Backup-Prüfung:", error);
+    sendErrorLog("Backup-Prüfung fehlgeschlagen", error);
+  });
+
   // Jede Minute prüfen.
   setInterval(() => {
     checkDailyLineup().catch((error) => {
@@ -4590,6 +4718,11 @@ function startSchedulers() {
     postHealthCheck("Automatisch").catch((error) => {
       console.error("❌ Fehler bei Healthcheck-Prüfung:", error);
       sendErrorLog("Healthcheck-Prüfung fehlgeschlagen", error);
+    });
+
+    checkDailyBackup("Automatisch").catch((error) => {
+      console.error("❌ Fehler bei Backup-Prüfung:", error);
+      sendErrorLog("Backup-Prüfung fehlgeschlagen", error);
     });
   }, 60 * 1000);
 
@@ -4665,6 +4798,12 @@ async function registerCommands() {
     new SlashCommandBuilder()
       .setName("smv-status")
       .setDescription("Zeigt den aktuellen Gesamtstatus vom SMV-Bot")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("backup")
+      .setDescription("Erstellt manuell ein Backup der Bot-Daten")
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
       .toJSON(),
 
@@ -4994,6 +5133,10 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.isChatInputCommand() && interaction.commandName === "smv-status") {
       return showSmvStatus(interaction);
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === "backup") {
+      return createManualBackup(interaction);
     }
 
     if (interaction.isChatInputCommand() && interaction.commandName === "abmeldungen") {
