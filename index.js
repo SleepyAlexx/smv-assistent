@@ -1,3 +1,4 @@
+// UPDATE: Verbesserungen eingebaut: Abmeldungs-Scan, WA-Status, Aufstellungs-Hinweis, 30-Minuten-Erinnerung und Sicherheitsabfragen.
 // UPDATE: Aufstellung Mittwoch und Sonntag jetzt standardmäßig um 19:30 Uhr; andere Tage bleiben 20:30 Uhr.
 // UPDATE: Abmeldungen werden jetzt erst 7 Tage nach dem Bis-Datum um 00 Uhr automatisch gelöscht.
 // UPDATE: Neuer Abmeldungs-Channel auf 1522813672244908135 gesetzt.
@@ -360,6 +361,7 @@ function getDefaultData() {
     weeklyPayments: {},
     weeklySummaries: {},
     weeklyPaymentPauses: {},
+    lineupReminders: {},
     absences: {},
   };
 }
@@ -389,6 +391,7 @@ function loadData() {
       weeklyPayments: data.weeklyPayments || {},
       weeklySummaries: data.weeklySummaries || {},
       weeklyPaymentPauses: data.weeklyPaymentPauses || {},
+      lineupReminders: data.lineupReminders || {},
       absences: data.absences || {},
     };
   } catch (error) {
@@ -882,6 +885,59 @@ function isLineupInteractionClosed(lineup) {
   return Boolean(lineup.cancelled || lineup.closed || hasLineupStartPassed(lineup));
 }
 
+function getLineupReminderMinutes(lineup) {
+  return parseLineupStartMinutes(getLineupStartText(lineup)) - 30;
+}
+
+function shouldSendLineupReminder(lineup) {
+  const now = getBerlinParts();
+
+  if (!lineup || lineup.cancelled || lineup.closed) return false;
+  if (now.dateKey !== lineup.dateKey) return false;
+
+  const currentMinutes = getCurrentBerlinMinutes();
+  const reminderMinutes = getLineupReminderMinutes(lineup);
+  const startMinutes = parseLineupStartMinutes(getLineupStartText(lineup));
+
+  return currentMinutes >= reminderMinutes && currentMinutes < startMinutes;
+}
+
+function createConfirmActionRow(action, dateKey) {
+  const actionLabel = action === "cancel" ? "Absage bestätigen" : "Öffnen bestätigen";
+  const actionEmoji = action === "cancel" ? "🛑" : "🔓";
+  const actionStyle = action === "cancel" ? ButtonStyle.Danger : ButtonStyle.Success;
+
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`lineup_${action}_confirm_${dateKey}`)
+      .setLabel(actionLabel)
+      .setEmoji(actionEmoji)
+      .setStyle(actionStyle),
+
+    new ButtonBuilder()
+      .setCustomId("lineup_confirm_abort")
+      .setLabel("Abbrechen")
+      .setEmoji("❌")
+      .setStyle(ButtonStyle.Secondary)
+  );
+}
+
+function createWeeklyPauseConfirmRemoveRow(weekKey) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`weekly_pause_remove_confirm_${weekKey}`)
+      .setLabel("Aussetzung aufheben")
+      .setEmoji("🔁")
+      .setStyle(ButtonStyle.Danger),
+
+    new ButtonBuilder()
+      .setCustomId("weekly_pause_remove_abort")
+      .setLabel("Abbrechen")
+      .setEmoji("❌")
+      .setStyle(ButtonStyle.Secondary)
+  );
+}
+
 function createEmptyLineup(dateKey, dateText, weekday, createdBy = null) {
   return {
     dateKey,
@@ -934,6 +990,7 @@ function createLineupEmbed(lineup) {
         "**Event Info:**",
         `📅 **Datum:** ${lineup.dateText}`,
         `🕘 **Beginn:** ${getLineupStartText(lineup)}`,
+        ["Mittwoch", "Sonntag"].includes(lineup.weekday) ? "ℹ️ **Hinweis:** Mittwoch & Sonntag beginnt die Aufstellung früher." : null,
         "",
         "**Deskription:**",
         "✅ Ihr schafft es pünktlich zur Aufstellung zu kommen.",
@@ -1103,17 +1160,19 @@ async function announceLineupTimeChanged(lineup, oldTime, newTime, leaderId) {
       "",
       "Die heutige Aufstellung wurde verschoben.",
       "",
-      `Alte Uhrzeit: **${oldTime}**`,
-      `Neue Uhrzeit: **${newTime}**`,
+      `📅 **Datum:** ${lineup.dateText}`,
+      `🕘 **Alte Uhrzeit:** ${oldTime}`,
+      `🕘 **Neue Uhrzeit:** ${newTime}`,
+      `👑 **Geändert von:** <@${leaderId}>`,
+      `🕘 **Zeitpunkt:** ${formatGermanDateTimeFromMs(Date.now())}`,
       "",
       "Bitte beachtet die neue Uhrzeit.",
-      `Uhrzeit geändert von: <@${leaderId}>`,
     ].join("\n"),
     allowedMentions: { roles: [CONFIG.lineupMentionRoleId], users: [leaderId] },
   });
 }
 
-async function cancelLineup(interaction, dateKey) {
+async function cancelLineup(interaction, dateKey, alreadyAcknowledged = false) {
   if (!hasLeaderPermission(interaction.member)) {
     return interaction.reply({
       content: "❌ Du hast keine Berechtigung, die Aufstellung abzusagen.",
@@ -1149,13 +1208,22 @@ async function cancelLineup(interaction, dateKey) {
   await updateLineupMessage(lineup);
   await announceLineupCancelled(lineup, interaction.user.id);
 
+  const doneMessage = "✅ Aufstellung wurde abgesagt und die SMV-Rolle wurde informiert.";
+
+  if (alreadyAcknowledged) {
+    return interaction.followUp({
+      content: doneMessage,
+      ephemeral: true,
+    });
+  }
+
   return interaction.reply({
-    content: "✅ Aufstellung wurde abgesagt und die SMV-Rolle wurde informiert.",
+    content: doneMessage,
     ephemeral: true,
   });
 }
 
-async function reopenLineup(interaction, dateKey) {
+async function reopenLineup(interaction, dateKey, alreadyAcknowledged = false) {
   if (!hasLeaderPermission(interaction.member)) {
     return interaction.reply({
       content: "❌ Du hast keine Berechtigung, die Aufstellung wieder zu öffnen.",
@@ -1193,8 +1261,17 @@ async function reopenLineup(interaction, dateKey) {
   await updateLineupMessage(lineup);
   await announceLineupReopened(lineup, interaction.user.id);
 
+  const doneMessage = "✅ Aufstellung wurde wieder geöffnet und die SMV-Rolle wurde informiert.";
+
+  if (alreadyAcknowledged) {
+    return interaction.followUp({
+      content: doneMessage,
+      ephemeral: true,
+    });
+  }
+
   return interaction.reply({
-    content: "✅ Aufstellung wurde wieder geöffnet und die SMV-Rolle wurde informiert.",
+    content: doneMessage,
     ephemeral: true,
   });
 }
@@ -1423,6 +1500,43 @@ async function checkDailyLineup() {
   if (!isLineupDay(now.weekday)) return;
 
   await createLineupForToday("auto-check");
+}
+
+async function checkLineupReminders() {
+  const now = getBerlinParts();
+  const data = loadData();
+  const lineup = data.lineups?.[now.dateKey];
+
+  if (!lineup) return;
+  if (!shouldSendLineupReminder(lineup)) return;
+
+  if (!data.lineupReminders) data.lineupReminders = {};
+  if (data.lineupReminders[now.dateKey]) return;
+
+  await sendToChannel(CONFIG.lineupChannelId, {
+    content: [
+      `<@&${CONFIG.lineupMentionRoleId}>`,
+      "",
+      "⏰ **SMV AUFSTELLUNGS-ERINNERUNG**",
+      "",
+      "Die Aufstellung beginnt in ungefähr **30 Minuten**.",
+      "",
+      `📅 **Datum:** ${lineup.dateText}`,
+      `🕘 **Beginn:** ${getLineupStartText(lineup)}`,
+      "",
+      "Bitte meldet euch rechtzeitig mit ✅ oder ❌ an.",
+    ].join("\n"),
+    allowedMentions: { roles: [CONFIG.lineupMentionRoleId] },
+  });
+
+  data.lineupReminders[now.dateKey] = {
+    sentAt: new Date().toISOString(),
+    lineupMessageId: lineup.messageId || null,
+  };
+
+  saveData(data);
+
+  console.log(`✅ Aufstellungs-Erinnerung für ${now.dateKey} wurde gesendet.`);
 }
 
 async function checkLineupClosures() {
@@ -2082,6 +2196,108 @@ async function postAbsence(interaction) {
     ephemeral: true,
   });
 }
+
+
+async function scanExistingAbsences(interaction) {
+  if (!hasLeaderPermission(interaction.member)) {
+    return interaction.reply({
+      content: "❌ Du hast keine Berechtigung für diesen Befehl.",
+      ephemeral: true,
+    });
+  }
+
+  await interaction.reply({
+    content: "🔍 Ich scanne den Abmeldungs-Channel und speichere erkennbare Abmeldungen nachträglich.",
+    ephemeral: true,
+  });
+
+  const channel = await client.channels.fetch(CONFIG.absenceChannelId).catch(() => null);
+
+  if (!channel || !channel.messages) {
+    return interaction.followUp({
+      content: "❌ Der Abmeldungs-Channel wurde nicht gefunden.",
+      ephemeral: true,
+    });
+  }
+
+  const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+
+  if (!messages) {
+    return interaction.followUp({
+      content: "❌ Nachrichten konnten nicht geladen werden.",
+      ephemeral: true,
+    });
+  }
+
+  const data = loadData();
+  if (!data.absences) data.absences = {};
+
+  let scanned = 0;
+  let saved = 0;
+  let skipped = 0;
+
+  for (const message of messages.values()) {
+    const embed = message.embeds?.[0];
+
+    if (!embed || !String(embed.title || "").includes("ABMELDUNG")) continue;
+
+    scanned += 1;
+
+    if (data.absences[message.id]) {
+      skipped += 1;
+      continue;
+    }
+
+    const nameField = embed.fields?.find((field) => field.name?.includes("Name"));
+    const periodField = embed.fields?.find((field) => field.name?.includes("Zeitraum"));
+    const submitterField = embed.fields?.find((field) => field.name?.includes("Eingereicht"));
+
+    const name = nameField?.value || "Unbekannt";
+    const periodText = periodField?.value || "";
+    const untilMatch = periodText.match(/\*\*Bis:\*\*\s*([^\n]+)/i);
+    const fromMatch = periodText.match(/\*\*Von:\*\*\s*([^\n]+)/i);
+    const userMatch = String(submitterField?.value || "").match(/<@(\d+)>/);
+
+    const until = untilMatch ? untilMatch[1].trim() : "";
+    const from = fromMatch ? fromMatch[1].trim() : "";
+    const untilDateKey = parseGermanDateKey(until);
+
+    if (!untilDateKey) {
+      skipped += 1;
+      continue;
+    }
+
+    data.absences[message.id] = {
+      messageId: message.id,
+      channelId: CONFIG.absenceChannelId,
+      userId: userMatch ? userMatch[1] : null,
+      name,
+      from,
+      until,
+      untilDateKey,
+      createdAt: message.createdAt ? message.createdAt.toISOString() : new Date().toISOString(),
+      scannedAt: new Date().toISOString(),
+    };
+
+    saved += 1;
+  }
+
+  saveData(data);
+
+  return interaction.followUp({
+    content: [
+      "✅ Abmeldungs-Scan abgeschlossen.",
+      "",
+      `🔍 Gefundene Abmeldungen: **${scanned}**`,
+      `✅ Neu gespeichert: **${saved}**`,
+      `ℹ️ Übersprungen: **${skipped}**`,
+      "",
+      "Gespeicherte Abmeldungen werden jetzt ebenfalls nach der 7-Tage-Regel automatisch gelöscht.",
+    ].join("\n"),
+    ephemeral: true,
+  });
+}
+
 
 
 
@@ -3297,6 +3513,61 @@ async function manuallyAddWeeklyPayment(interaction) {
   });
 }
 
+async function showWeeklyPaymentStatus(interaction) {
+  if (!hasLeaderPermission(interaction.member)) {
+    return interaction.reply({
+      content: "❌ Du hast keine Berechtigung für diesen Befehl.",
+      ephemeral: true,
+    });
+  }
+
+  const weekKey = getWeekKey();
+  const pause = getWeeklyPaymentPause(weekKey);
+  const range = getDateRangeForWeekKey(weekKey);
+
+  const guild = interaction.guild || await client.guilds.fetch(process.env.GUILD_ID).catch(() => null);
+  const payers = guild ? await getPayerMembers(guild) : [];
+  const weekData = await getWeeklyPaymentsForWeekDb(weekKey);
+  const paidIds = Object.keys(weekData.paidUsers || {});
+  const paidCount = payers.filter((member) => paidIds.includes(member.id)).length;
+  const unpaidCount = Math.max(payers.length - paidCount, 0);
+
+  const statusLines = pause
+    ? [
+        "💸 **Status:** Ausgesetzt",
+        `👑 **Ausgesetzt von:** <@${pause.pausedBy}>`,
+        `🕘 **Ausgesetzt am:** ${formatGermanDateTimeFromMs(pause.pausedAt)}`,
+        `📝 **Grund:** ${pause.reason || "—"}`,
+      ]
+    : [
+        "✅ **Status:** Aktiv",
+        `Bezahlt: **${paidCount}**`,
+        `Nicht bezahlt: **${unpaidCount}**`,
+        `Zahlungspflichtig: **${payers.length}**`,
+      ];
+
+  return interaction.reply({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(pause ? CONFIG.warningColor : CONFIG.successColor)
+        .setTitle("💸 WOCHENABGABE STATUS")
+        .setDescription(
+          [
+            "━━━━━━━━━━━━━━━━━━━━",
+            `📅 **Woche:** ${weekKey}`,
+            range ? `🗓️ **Zeitraum:** ${range.from} bis ${range.until}` : null,
+            "",
+            ...statusLines,
+            "━━━━━━━━━━━━━━━━━━━━",
+          ].filter(Boolean).join("\n")
+        )
+        .setFooter({ text: `${CONFIG.shortName} • Wochenabgabe` }),
+    ],
+    ephemeral: true,
+    allowedMentions: pause ? { users: [pause.pausedBy].filter(Boolean) } : undefined,
+  });
+}
+
 async function postWeeklyPaymentOverview(reason = "scheduled") {
   const weekKey = getWeekKey();
   const pause = getWeeklyPaymentPause(weekKey);
@@ -3937,6 +4208,10 @@ function startSchedulers() {
     console.error("❌ Fehler bei erster Wochenabgabe-Prüfung:", error);
   });
 
+  checkLineupReminders().catch((error) => {
+    console.error("❌ Fehler bei erster Aufstellungs-Erinnerungsprüfung:", error);
+  });
+
   checkLineupClosures().catch((error) => {
     console.error("❌ Fehler bei erster Aufstellungs-Schließprüfung:", error);
   });
@@ -3957,6 +4232,10 @@ function startSchedulers() {
 
     checkWeeklyPaymentSummary().catch((error) => {
       console.error("❌ Fehler bei Wochenabgabe-Prüfung:", error);
+    });
+
+    checkLineupReminders().catch((error) => {
+      console.error("❌ Fehler bei Aufstellungs-Erinnerungsprüfung:", error);
     });
 
     checkLineupClosures().catch((error) => {
@@ -4016,6 +4295,18 @@ async function registerCommands() {
     new SlashCommandBuilder()
       .setName("wochenabgabe-uebersicht")
       .setDescription("Postet manuell die aktuelle Wochenabgabe-Übersicht")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("wa-status")
+      .setDescription("Zeigt den aktuellen Wochenabgabe-Status")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("abmeldungen-scan")
+      .setDescription("Scannt alte Abmeldungen und speichert sie für die Auto-Löschung")
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
       .toJSON(),
 
@@ -4302,6 +4593,14 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
+    if (interaction.isChatInputCommand() && interaction.commandName === "wa-status") {
+      return showWeeklyPaymentStatus(interaction);
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === "abmeldungen-scan") {
+      return scanExistingAbsences(interaction);
+    }
+
     if (interaction.isChatInputCommand() && interaction.commandName === "wochenabgabe-uebersicht") {
       if (!hasLeaderPermission(interaction.member)) {
         return interaction.reply({
@@ -4440,14 +4739,63 @@ client.on("interactionCreate", async (interaction) => {
     // Aufstellung Buttons
     // -------------------------------
 
+    if (interaction.isButton() && interaction.customId === "lineup_confirm_abort") {
+      return interaction.update({
+        content: "❌ Aktion abgebrochen.",
+        components: [],
+      });
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith("lineup_cancel_confirm_")) {
+      const dateKey = interaction.customId.replace("lineup_cancel_confirm_", "");
+      await interaction.update({
+        content: "⏳ Aufstellung wird abgesagt ...",
+        components: [],
+      });
+      return cancelLineup(interaction, dateKey, true);
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith("lineup_reopen_confirm_")) {
+      const dateKey = interaction.customId.replace("lineup_reopen_confirm_", "");
+      await interaction.update({
+        content: "⏳ Aufstellung wird wieder geöffnet ...",
+        components: [],
+      });
+      return reopenLineup(interaction, dateKey, true);
+    }
+
     if (interaction.isButton() && interaction.customId.startsWith("lineup_cancel_")) {
       const dateKey = interaction.customId.replace("lineup_cancel_", "");
-      return cancelLineup(interaction, dateKey);
+
+      if (!hasLeaderPermission(interaction.member)) {
+        return interaction.reply({
+          content: "❌ Du hast keine Berechtigung, die Aufstellung abzusagen.",
+          ephemeral: true,
+        });
+      }
+
+      return interaction.reply({
+        content: "⚠️ Bist du sicher, dass du diese Aufstellung absagen möchtest?",
+        components: [createConfirmActionRow("cancel", dateKey)],
+        ephemeral: true,
+      });
     }
 
     if (interaction.isButton() && interaction.customId.startsWith("lineup_reopen_")) {
       const dateKey = interaction.customId.replace("lineup_reopen_", "");
-      return reopenLineup(interaction, dateKey);
+
+      if (!hasLeaderPermission(interaction.member)) {
+        return interaction.reply({
+          content: "❌ Du hast keine Berechtigung, die Aufstellung wieder zu öffnen.",
+          ephemeral: true,
+        });
+      }
+
+      return interaction.reply({
+        content: "⚠️ Bist du sicher, dass du diese Aufstellung wieder öffnen möchtest?",
+        components: [createConfirmActionRow("reopen", dateKey)],
+        ephemeral: true,
+      });
     }
 
     if (interaction.isButton() && interaction.customId.startsWith("lineup_time_")) {
@@ -4677,9 +5025,26 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
+    if (interaction.isButton() && interaction.customId === "weekly_pause_remove_abort") {
+      return interaction.update({
+        content: "❌ Aktion abgebrochen.",
+        embeds: [],
+        components: [],
+      });
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith("weekly_pause_remove_confirm_")) {
+      const weekKey = interaction.customId.replace("weekly_pause_remove_confirm_", "");
+      return removeWeeklyPaymentPause(interaction, weekKey);
+    }
+
     if (interaction.isButton() && interaction.customId.startsWith("weekly_pause_remove_")) {
       const weekKey = interaction.customId.replace("weekly_pause_remove_", "");
-      return removeWeeklyPaymentPause(interaction, weekKey);
+      return interaction.update({
+        content: `⚠️ Bist du sicher, dass die Wochenabgabe für **${weekKey}** wieder aktiv sein soll?`,
+        embeds: [],
+        components: [createWeeklyPauseConfirmRemoveRow(weekKey)],
+      });
     }
 
     if (interaction.isStringSelectMenu() && interaction.customId === "weekly_pause_weeks_select") {
