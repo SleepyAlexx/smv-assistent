@@ -3846,16 +3846,46 @@ function getFootballUsersByStatus(event, status) {
     .map(([userId, userData]) => ({
       userId,
       name: userData.name || `<@${userId}>`,
-    }));
+      sortAt: userData.statusChangedAt || userData.registeredAt || userData.updatedAt || "",
+    }))
+    .sort((a, b) => String(a.sortAt).localeCompare(String(b.sortAt)));
 }
 
 function formatFootballUserList(users) {
   if (users.length === 0) return "—";
 
-  return users
-    .map((user) => `╰ ${user.name}`)
-    .join("\n")
-    .slice(0, 1000);
+  const lines = users.map((user, index) => {
+    const isLast = index === users.length - 1;
+    return `${isLast ? "┖" : "┃"} ${user.name}`;
+  });
+
+  const result = lines.join("\n");
+
+  if (result.length <= 1000) return result;
+
+  const safeLines = [];
+  let currentLength = 0;
+
+  for (const line of lines) {
+    const nextLength = currentLength + line.length + (safeLines.length > 0 ? 1 : 0);
+
+    if (nextLength > 960) break;
+
+    safeLines.push(line);
+    currentLength = nextLength;
+  }
+
+  const remaining = users.length - safeLines.length;
+
+  if (remaining > 0) {
+    if (safeLines.length > 0) {
+      safeLines[safeLines.length - 1] = safeLines[safeLines.length - 1].replace(/^┃/, "┖");
+    }
+
+    safeLines.push(`┖ ... und ${remaining} weitere`);
+  }
+
+  return safeLines.join("\n").slice(0, 1000);
 }
 
 function getFootballStatus(event) {
@@ -5478,7 +5508,8 @@ client.on("interactionCreate", async (interaction) => {
       const statusText = {
         present: "Anwesend",
         absent: "Abwesend",
-      }[selectedStatus];
+        unsure: "Ungewiss",
+      }[selectedStatus] || "Unbekannt";
 
       return interaction.reply({
         content: `✅ Deine Auswahl wurde gespeichert: **${statusText}**`,
@@ -5550,10 +5581,16 @@ client.on("interactionCreate", async (interaction) => {
       const member = interaction.member;
       const userId = interaction.user.id;
 
+      const previousFootballUserData = event.users[userId] || {};
+      const nowIso = new Date().toISOString();
+
       event.users[userId] = {
+        ...previousFootballUserData,
         status: selectedStatus,
         name: getMemberName(member, userId),
-        updatedAt: new Date().toISOString(),
+        registeredAt: previousFootballUserData.registeredAt || previousFootballUserData.updatedAt || nowIso,
+        statusChangedAt: nowIso,
+        updatedAt: nowIso,
       };
 
       data.footballEvents[eventId] = event;
