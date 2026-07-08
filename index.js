@@ -1,3 +1,5 @@
+// UPDATE: Tagesprotokoll wird jetzt in Channel 1524251646664900658 gepostet.
+// UPDATE: Tagesprotokoll, /smv-status, /abmeldungen, /aufstellung-morgen, Zahlungs-Remove-Schutz und Auto-Lösch-Logs eingebaut.
 // UPDATE: Verbesserungen eingebaut: Abmeldungs-Scan, WA-Status, Aufstellungs-Hinweis, 30-Minuten-Erinnerung und Sicherheitsabfragen.
 // UPDATE: Aufstellung Mittwoch und Sonntag jetzt standardmäßig um 19:30 Uhr; andere Tage bleiben 20:30 Uhr.
 // UPDATE: Abmeldungen werden jetzt erst 7 Tage nach dem Bis-Datum um 00 Uhr automatisch gelöscht.
@@ -126,6 +128,7 @@ const CONFIG = {
   // Sanktionen
   sanctionChannelId: "1434318024646856758",
   sanctionLogChannelId: "1508286380403589131",
+  dailyReportChannelId: "1524251646664900658",
   sanctionDueDays: 7,
 
   // Fußball-Event-Channel
@@ -362,6 +365,7 @@ function getDefaultData() {
     weeklySummaries: {},
     weeklyPaymentPauses: {},
     lineupReminders: {},
+    dailyReports: {},
     absences: {},
   };
 }
@@ -392,6 +396,7 @@ function loadData() {
       weeklySummaries: data.weeklySummaries || {},
       weeklyPaymentPauses: data.weeklyPaymentPauses || {},
       lineupReminders: data.lineupReminders || {},
+      dailyReports: data.dailyReports || {},
       absences: data.absences || {},
     };
   } catch (error) {
@@ -553,12 +558,31 @@ function addDaysToDateKey(dateKey, days = 0) {
   return `${year}-${month}-${day}`;
 }
 
+function getDeleteDateKeyForAbsence(absence) {
+  if (!absence?.untilDateKey) return null;
+  return addDaysToDateKey(absence.untilDateKey, 7);
+}
+
+function formatDateKeyGerman(dateKey) {
+  if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return "—";
+
+  const [year, month, day] = dateKey.split("-");
+  return `${day}.${month}.${year}`;
+}
+
+function getTomorrowBerlinParts() {
+  const now = getBerlinParts();
+  const date = new Date(`${now.dateKey}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return getBerlinParts(date);
+}
+
 function shouldDeleteAbsence(absence, nowDateKey = getBerlinParts().dateKey) {
   if (!absence?.untilDateKey) return false;
 
   // Erst 7 Tage nach dem Bis-Datum löschen:
   // Beispiel: Bis 20.06.2026 -> ab 27.06.2026 um 00 Uhr wird gelöscht.
-  const deleteDateKey = addDaysToDateKey(absence.untilDateKey, 7);
+  const deleteDateKey = getDeleteDateKeyForAbsence(absence);
 
   if (!deleteDateKey) return false;
 
@@ -1417,56 +1441,56 @@ async function forcePostLineupForToday(reason = "manual-force") {
   };
 }
 
-async function createLineupForToday(reason = "scheduled") {
-  const now = getBerlinParts();
-
-  if (!isLineupDay(now.weekday)) {
-    console.log(`ℹ️ Heute ist ${now.weekday}. Keine Aufstellung.`);
-    return;
+async function createLineupForDate(targetParts, reason = "scheduled", createdBy = null, force = false) {
+  if (!isLineupDay(targetParts.weekday)) {
+    console.log(`ℹ️ ${targetParts.weekday} ist kein Aufstellungstag.`);
+    return null;
   }
 
   const data = loadData();
 
-  if (data.postedDates[now.dateKey]) {
-    const savedMessage = await findLineupMessageById(data.postedDates[now.dateKey].messageId);
+  if (!force && data.postedDates[targetParts.dateKey]) {
+    const savedMessage = await findLineupMessageById(data.postedDates[targetParts.dateKey].messageId);
 
     if (savedMessage) {
-      console.log(`ℹ️ Aufstellung für ${now.dateKey} wurde bereits erstellt und die Nachricht existiert noch.`);
-      return;
+      console.log(`ℹ️ Aufstellung für ${targetParts.dateKey} wurde bereits erstellt und die Nachricht existiert noch.`);
+      return savedMessage;
     }
 
-    console.log(`⚠️ Aufstellung für ${now.dateKey} war gespeichert, aber die Discord-Nachricht fehlt. Ich erstelle sie neu.`);
-    delete data.postedDates[now.dateKey];
+    console.log(`⚠️ Aufstellung für ${targetParts.dateKey} war gespeichert, aber die Discord-Nachricht fehlt. Ich erstelle sie neu.`);
+    delete data.postedDates[targetParts.dateKey];
 
-    if (data.lineups?.[now.dateKey]) {
-      data.lineups[now.dateKey].messageId = null;
-      data.lineups[now.dateKey].closed = false;
-      data.lineups[now.dateKey].cancelled = false;
+    if (data.lineups?.[targetParts.dateKey]) {
+      data.lineups[targetParts.dateKey].messageId = null;
+      data.lineups[targetParts.dateKey].closed = false;
+      data.lineups[targetParts.dateKey].cancelled = false;
     }
 
     saveData(data);
   }
 
-  const existingMessage = await findExistingLineupMessageForDate(now.dateText);
+  if (!force) {
+    const existingMessage = await findExistingLineupMessageForDate(targetParts.dateText);
 
-  if (existingMessage) {
-    const existingLineup = data.lineups?.[now.dateKey] || createEmptyLineup(now.dateKey, now.dateText, now.weekday, client.user.id);
-    existingLineup.messageId = existingMessage.id;
+    if (existingMessage) {
+      const existingLineup = data.lineups?.[targetParts.dateKey] || createEmptyLineup(targetParts.dateKey, targetParts.dateText, targetParts.weekday, createdBy || client.user.id);
+      existingLineup.messageId = existingMessage.id;
 
-    data.postedDates[now.dateKey] = {
-      messageId: existingMessage.id,
-      createdAt: new Date().toISOString(),
-      reason: "existing-message-found",
-    };
+      data.postedDates[targetParts.dateKey] = {
+        messageId: existingMessage.id,
+        createdAt: new Date().toISOString(),
+        reason: "existing-message-found",
+      };
 
-    data.lineups[now.dateKey] = existingLineup;
-    saveData(data);
+      data.lineups[targetParts.dateKey] = existingLineup;
+      saveData(data);
 
-    console.log(`ℹ️ Es existiert bereits eine Aufstellung für ${now.dateText}. Keine neue Nachricht erstellt.`);
-    return;
+      console.log(`ℹ️ Es existiert bereits eine Aufstellung für ${targetParts.dateText}. Keine neue Nachricht erstellt.`);
+      return existingMessage;
+    }
   }
 
-  const lineup = createEmptyLineup(now.dateKey, now.dateText, now.weekday, client.user.id);
+  const lineup = createEmptyLineup(targetParts.dateKey, targetParts.dateText, targetParts.weekday, createdBy || client.user.id);
 
   const message = await sendToChannel(CONFIG.lineupChannelId, {
     content: `<@&${CONFIG.lineupMentionRoleId}>`,
@@ -1477,21 +1501,64 @@ async function createLineupForToday(reason = "scheduled") {
 
   if (!message) {
     console.error("❌ Aufstellung konnte nicht gesendet werden.");
-    return;
+    return null;
   }
 
   lineup.messageId = message.id;
 
-  data.postedDates[now.dateKey] = {
+  data.postedDates[targetParts.dateKey] = {
     messageId: message.id,
     createdAt: new Date().toISOString(),
     reason,
   };
 
-  data.lineups[now.dateKey] = lineup;
+  data.lineups[targetParts.dateKey] = lineup;
   saveData(data);
 
-  console.log(`✅ ${lineup.title} für ${now.dateText} wurde erstellt. Grund: ${reason}`);
+  console.log(`✅ ${lineup.title} für ${targetParts.dateText} wurde erstellt. Grund: ${reason}`);
+  return message;
+}
+
+async function createLineupForToday(reason = "scheduled") {
+  const now = getBerlinParts();
+  return createLineupForDate(now, reason, client.user.id, false);
+}
+
+async function createLineupForTomorrow(interaction) {
+  if (!hasLeaderPermission(interaction.member)) {
+    return interaction.reply({
+      content: "❌ Du hast keine Berechtigung für diesen Befehl.",
+      ephemeral: true,
+    });
+  }
+
+  const tomorrow = getTomorrowBerlinParts();
+
+  if (!isLineupDay(tomorrow.weekday)) {
+    return interaction.reply({
+      content: `ℹ️ Morgen ist **${tomorrow.weekday}**. Dafür gibt es keine Aufstellung.`,
+      ephemeral: true,
+    });
+  }
+
+  await interaction.reply({
+    content: `⏳ Ich erstelle die Aufstellung für morgen (${tomorrow.dateText}) ...`,
+    ephemeral: true,
+  });
+
+  const message = await createLineupForDate(tomorrow, `morgen-command von ${interaction.user.tag}`, interaction.user.id, false);
+
+  if (!message) {
+    return interaction.followUp({
+      content: "❌ Aufstellung für morgen konnte nicht erstellt werden.",
+      ephemeral: true,
+    });
+  }
+
+  return interaction.followUp({
+    content: `✅ Aufstellung für morgen wurde in <#${CONFIG.lineupChannelId}> erstellt.\n📅 **${tomorrow.weekday}, ${tomorrow.dateText}**\n🕘 **${getDefaultLineupStartText(tomorrow.weekday)}**`,
+    ephemeral: true,
+  });
 }
 
 async function checkDailyLineup() {
@@ -2776,6 +2843,22 @@ function createWeeklyPaymentLogButtons(identifier, userId, removed = false) {
   );
 }
 
+function createWeeklyPaymentRemoveConfirmRow(identifier, userId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`weekly_remove_confirm_${identifier}_${userId}`)
+      .setLabel("Zahlung wirklich entfernen")
+      .setEmoji("❌")
+      .setStyle(ButtonStyle.Danger),
+
+    new ButtonBuilder()
+      .setCustomId("weekly_remove_abort")
+      .setLabel("Abbrechen")
+      .setEmoji("↩️")
+      .setStyle(ButtonStyle.Secondary)
+  );
+}
+
 function createWeeklyPaymentLogEmbed({ userId, userName, weekKey = null, weekKeys = null, paidAt, removed = false, removedBy = null, removedByName = null, removedAt = null }) {
   const displayName = userName || "Unbekannter User";
   const weeks = weekKeys || (weekKey ? [weekKey] : []);
@@ -3225,7 +3308,7 @@ async function handleWeeklyPaymentSelection(interaction) {
   });
 }
 
-async function removeWeeklyPayment(interaction, identifier, userId) {
+async function removeWeeklyPayment(interaction, identifier, userId, alreadyAcknowledged = false) {
   if (!hasLeaderPermission(interaction.member)) {
     return interaction.reply({
       content: "❌ Du hast keine Berechtigung, Wochenabgaben zu korrigieren.",
@@ -3291,8 +3374,17 @@ async function removeWeeklyPayment(interaction, identifier, userId) {
     ],
   });
 
+  const doneMessage = `✅ Zahlung von <@${userId}> wurde entfernt.\n\n**Entfernte Wochen:**\n${formatWeekList(removedWeeks)}`;
+
+  if (alreadyAcknowledged) {
+    return interaction.update({
+      content: doneMessage,
+      components: [],
+    });
+  }
+
   return interaction.reply({
-    content: `✅ Zahlung von <@${userId}> wurde entfernt.\n\n**Entfernte Wochen:**\n${formatWeekList(removedWeeks)}`,
+    content: doneMessage,
     ephemeral: true,
   });
 }
@@ -4149,6 +4241,161 @@ async function createAndPostFootballEvent(interaction) {
 }
 
 
+function getActiveAbsenceEntries() {
+  const data = loadData();
+  const now = getBerlinParts();
+
+  return Object.values(data.absences || {})
+    .filter((absence) => {
+      const deleteDateKey = getDeleteDateKeyForAbsence(absence);
+      return !deleteDateKey || now.dateKey < deleteDateKey;
+    })
+    .sort((a, b) => String(a.untilDateKey || "").localeCompare(String(b.untilDateKey || "")));
+}
+
+function formatAbsenceLine(absence) {
+  const deleteDateKey = getDeleteDateKeyForAbsence(absence);
+  return [
+    `**${absence.name || "Unbekannt"}**`,
+    `╰ Von: **${absence.from || "—"}**`,
+    `╰ Bis: **${absence.until || "—"}**`,
+    `╰ Auto-Löschung: **${deleteDateKey ? `${formatDateKeyGerman(deleteDateKey)} um 00:00 Uhr` : "nicht erkannt"}**`,
+  ].join("\n");
+}
+
+async function showActiveAbsences(interaction) {
+  if (!hasLeaderPermission(interaction.member)) {
+    return interaction.reply({
+      content: "❌ Du hast keine Berechtigung für diesen Befehl.",
+      ephemeral: true,
+    });
+  }
+
+  const absences = getActiveAbsenceEntries();
+
+  if (absences.length === 0) {
+    return interaction.reply({
+      content: "✅ Aktuell sind keine aktiven Abmeldungen gespeichert.",
+      ephemeral: true,
+    });
+  }
+
+  const lines = absences.map(formatAbsenceLine);
+  const chunks = chunkText(lines.join("\n\n"), 3800);
+
+  return interaction.reply({
+    embeds: chunks.map((chunk, index) =>
+      new EmbedBuilder()
+        .setColor(CONFIG.warningColor)
+        .setTitle(index === 0 ? "📋 AKTIVE ABMELDUNGEN" : "📋 AKTIVE ABMELDUNGEN · Fortsetzung")
+        .setDescription(chunk)
+        .setFooter({ text: `${CONFIG.shortName} • Abmeldungen • ${absences.length} aktiv` })
+    ),
+    ephemeral: true,
+  });
+}
+
+async function showSmvStatus(interaction) {
+  if (!hasLeaderPermission(interaction.member)) {
+    return interaction.reply({
+      content: "❌ Du hast keine Berechtigung für diesen Befehl.",
+      ephemeral: true,
+    });
+  }
+
+  const now = getBerlinParts();
+  const data = loadData();
+  const todayLineup = data.lineups?.[now.dateKey] || null;
+  const weekKey = getWeekKey();
+  const pause = getWeeklyPaymentPause(weekKey);
+  const activeAbsences = getActiveAbsenceEntries();
+  const openSanctions = Object.values(data.sanctions || {}).filter((record) => !record.paid && !record.cancelled).length;
+
+  const lineupStatus = todayLineup
+    ? `${getLineupStatus(todayLineup)} · ${getLineupStartText(todayLineup)}`
+    : isLineupDay(now.weekday)
+      ? `noch nicht erstellt · ${getDefaultLineupStartText(now.weekday)}`
+      : "heute keine Aufstellung";
+
+  const waStatus = pause
+    ? `ausgesetzt · ${pause.reason || "Kein Grund"}`
+    : "aktiv";
+
+  return interaction.reply({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(CONFIG.embedColor)
+        .setTitle("🐻 SMV STATUS")
+        .setDescription(
+          [
+            "━━━━━━━━━━━━━━━━━━━━",
+            `📅 **Heute:** ${now.weekday}, ${now.dateText}`,
+            "",
+            `📋 **Aufstellung:** ${lineupStatus}`,
+            `⏰ **Erinnerung gesendet:** ${data.lineupReminders?.[now.dateKey] ? "Ja" : "Nein"}`,
+            "",
+            `💸 **Wochenabgabe:** ${waStatus}`,
+            `📋 **Aktive Abmeldungen:** ${activeAbsences.length}`,
+            `🚫 **Offene Sanktionen:** ${openSanctions}`,
+            "━━━━━━━━━━━━━━━━━━━━",
+          ].join("\n")
+        )
+        .setFooter({ text: `${CONFIG.shortName} • Status` }),
+    ],
+    ephemeral: true,
+  });
+}
+
+async function postDailyReport(reason = "scheduled") {
+  const now = getBerlinParts();
+
+  // Tagesprotokoll nur am Abend posten.
+  if (Number(now.hour) < 23) return;
+
+  const data = loadData();
+  if (!data.dailyReports) data.dailyReports = {};
+  if (data.dailyReports[now.dateKey]) return;
+
+  const lineup = data.lineups?.[now.dateKey] || null;
+  const weekKey = getWeekKey();
+  const pause = getWeeklyPaymentPause(weekKey);
+  const activeAbsences = getActiveAbsenceEntries();
+  const openSanctions = Object.values(data.sanctions || {}).filter((record) => !record.paid && !record.cancelled).length;
+
+  await sendToChannel(CONFIG.dailyReportChannelId, {
+    embeds: [
+      new EmbedBuilder()
+        .setColor(CONFIG.embedColor)
+        .setTitle("📋 SMV TAGESPROTOKOLL")
+        .setDescription(
+          [
+            "━━━━━━━━━━━━━━━━━━━━",
+            `📅 **Datum:** ${now.weekday}, ${now.dateText}`,
+            "",
+            `✅ **Aufstellung erstellt:** ${lineup ? "Ja" : "Nein"}`,
+            lineup ? `🕘 **Aufstellungszeit:** ${getLineupStartText(lineup)}` : null,
+            lineup ? `📌 **Aufstellungsstatus:** ${getLineupStatus(lineup)}` : null,
+            `⏰ **Erinnerung gesendet:** ${data.lineupReminders?.[now.dateKey] ? "Ja" : "Nein"}`,
+            "",
+            `💸 **Wochenabgabe:** ${pause ? `Ausgesetzt (${pause.reason || "Kein Grund"})` : "Aktiv"}`,
+            `📋 **Aktive Abmeldungen:** ${activeAbsences.length}`,
+            `🚫 **Offene Sanktionen:** ${openSanctions}`,
+            "",
+            `📝 **Grund:** ${reason}`,
+            "━━━━━━━━━━━━━━━━━━━━",
+          ].filter(Boolean).join("\n")
+        )
+        .setFooter({ text: `${CONFIG.shortName} • Tagesprotokoll` }),
+    ],
+  });
+
+  data.dailyReports[now.dateKey] = {
+    postedAt: new Date().toISOString(),
+    reason,
+  };
+  saveData(data);
+}
+
 async function checkAbsenceDeletions() {
   const now = getBerlinParts();
 
@@ -4179,6 +4426,27 @@ async function checkAbsenceDeletions() {
         console.error(`❌ Abmeldung ${absence.messageId} konnte nicht gelöscht werden:`, error.message);
       });
     }
+
+    await sendToChannel(CONFIG.sanctionLogChannelId, {
+      embeds: [
+        new EmbedBuilder()
+          .setColor(CONFIG.warningColor)
+          .setTitle("🧹 ABMELDUNG AUTOMATISCH GELÖSCHT")
+          .setDescription(
+            [
+              "━━━━━━━━━━━━━━━━━━━━",
+              `👤 **Name:** ${absence.name || "Unbekannt"}`,
+              absence.userId ? `📨 **User:** <@${absence.userId}>` : null,
+              `📅 **Von:** ${absence.from || "—"}`,
+              `📅 **Bis:** ${absence.until || "—"}`,
+              `🗑️ **Gelöscht am:** ${formatGermanDateTimeFromMs(Date.now())}`,
+              "━━━━━━━━━━━━━━━━━━━━",
+            ].filter(Boolean).join("\n")
+          )
+          .setFooter({ text: `${CONFIG.shortName} • Abmeldungen` }),
+      ],
+      allowedMentions: absence.userId ? { users: [absence.userId] } : undefined,
+    });
 
     delete data.absences[absenceId];
     changed = true;
@@ -4220,6 +4488,10 @@ function startSchedulers() {
     console.error("❌ Fehler bei erster Abmeldungs-Löschprüfung:", error);
   });
 
+  postDailyReport("Bot-Start-Prüfung").catch((error) => {
+    console.error("❌ Fehler bei erster Tagesprotokoll-Prüfung:", error);
+  });
+
   // Jede Minute prüfen.
   setInterval(() => {
     checkDailyLineup().catch((error) => {
@@ -4244,6 +4516,10 @@ function startSchedulers() {
 
     checkAbsenceDeletions().catch((error) => {
       console.error("❌ Fehler bei Abmeldungs-Löschprüfung:", error);
+    });
+
+    postDailyReport("Automatisch").catch((error) => {
+      console.error("❌ Fehler bei Tagesprotokoll-Prüfung:", error);
     });
   }, 60 * 1000);
 
@@ -4307,6 +4583,24 @@ async function registerCommands() {
     new SlashCommandBuilder()
       .setName("abmeldungen-scan")
       .setDescription("Scannt alte Abmeldungen und speichert sie für die Auto-Löschung")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("smv-status")
+      .setDescription("Zeigt den aktuellen Gesamtstatus vom SMV-Bot")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("abmeldungen")
+      .setDescription("Zeigt aktive gespeicherte Abmeldungen")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("aufstellung-morgen")
+      .setDescription("Postet die Aufstellung für morgen")
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
       .toJSON(),
 
@@ -4601,6 +4895,18 @@ client.on("interactionCreate", async (interaction) => {
       return scanExistingAbsences(interaction);
     }
 
+    if (interaction.isChatInputCommand() && interaction.commandName === "smv-status") {
+      return showSmvStatus(interaction);
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === "abmeldungen") {
+      return showActiveAbsences(interaction);
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === "aufstellung-morgen") {
+      return createLineupForTomorrow(interaction);
+    }
+
     if (interaction.isChatInputCommand() && interaction.commandName === "wochenabgabe-uebersicht") {
       if (!hasLeaderPermission(interaction.member)) {
         return interaction.reply({
@@ -4650,12 +4956,39 @@ client.on("interactionCreate", async (interaction) => {
       return handleWeeklyPaymentSelection(interaction);
     }
 
+    if (interaction.isButton() && interaction.customId === "weekly_remove_abort") {
+      return interaction.update({
+        content: "❌ Aktion abgebrochen.",
+        components: [],
+      });
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith("weekly_remove_confirm_")) {
+      const parts = interaction.customId.split("_");
+      const identifier = parts[3];
+      const userId = parts[4];
+
+      return removeWeeklyPayment(interaction, identifier, userId, true);
+    }
+
     if (interaction.isButton() && interaction.customId.startsWith("weekly_remove_")) {
       const parts = interaction.customId.split("_");
       const identifier = parts[2];
       const userId = parts[3];
 
-      return removeWeeklyPayment(interaction, identifier, userId);
+      if (!hasLeaderPermission(interaction.member)) {
+        return interaction.reply({
+          content: "❌ Du hast keine Berechtigung, Wochenabgaben zu korrigieren.",
+          ephemeral: true,
+        });
+      }
+
+      return interaction.reply({
+        content: `⚠️ Bist du sicher, dass du die Wochenabgabe von <@${userId}> entfernen möchtest?`,
+        components: [createWeeklyPaymentRemoveConfirmRow(identifier, userId)],
+        ephemeral: true,
+        allowedMentions: { users: [userId] },
+      });
     }
 
     if (interaction.isModalSubmit() && interaction.customId === "absence_modal") {
