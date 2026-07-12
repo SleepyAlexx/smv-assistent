@@ -133,6 +133,7 @@ const SANCTIONS = [
   { id: "p12", section: "§12", label: "Wochenabgabe nicht abgegeben", amount: 150000, special: "Wochenabgabe" },
   { id: "p14", section: "§14", label: "Nicht im Funk sein, ohne Abmeldung", amount: 140000 },
   { id: "p15", section: "§15", label: "Nichttragen von GPS, ohne Absprache", amount: 140000 },
+  { id: "p16", section: "§16", label: "Bei Aufstellung angemeldet aber nicht da", amount: 100000 },
   { id: "p17", section: "§17", label: "Nichttragen der Familienkleidung (während Familienaktionen)", amount: 350000 },
   { id: "p18", section: "§18", label: "Nichteinhaltung der Funkdisziplin", amount: 140000 },
   { id: "p19", section: "§19", label: "Unangemessenes Verhalten in der Öffentlichkeit, das die Familie gefährdet", amount: 350000 },
