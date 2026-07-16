@@ -539,9 +539,47 @@ function addDaysToDateKey(dateKey, days = 0) {
   return `${year}-${month}-${day}`;
 }
 
+function repairAbsenceDateKeys(absence) {
+  if (!absence) return false;
+
+  let changed = false;
+
+  if (!absence.fromDateKey && absence.from) {
+    const normalizedFrom = normalizeGermanDateInput(absence.from);
+
+    if (normalizedFrom.dateKey) {
+      absence.fromDateKey = normalizedFrom.dateKey;
+      absence.from = normalizedFrom.text;
+      changed = true;
+    }
+  }
+
+  if (!absence.untilDateKey && absence.until) {
+    const normalizedUntil = normalizeGermanDateInput(absence.until);
+
+    if (normalizedUntil.dateKey) {
+      absence.untilDateKey = normalizedUntil.dateKey;
+      absence.until = normalizedUntil.text;
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
+function getAbsenceUntilDateKey(absence) {
+  if (!absence) return null;
+  if (absence.untilDateKey) return absence.untilDateKey;
+
+  const normalizedUntil = normalizeGermanDateInput(absence.until || "");
+  return normalizedUntil.dateKey || null;
+}
+
 function getDeleteDateKeyForAbsence(absence) {
-  if (!absence?.untilDateKey) return null;
-  return addDaysToDateKey(absence.untilDateKey, 7);
+  const untilDateKey = getAbsenceUntilDateKey(absence);
+  if (!untilDateKey) return null;
+
+  return addDaysToDateKey(untilDateKey, 7);
 }
 
 function formatDateKeyGerman(dateKey) {
@@ -559,10 +597,9 @@ function getTomorrowBerlinParts() {
 }
 
 function shouldDeleteAbsence(absence, nowDateKey = getBerlinParts().dateKey) {
-  if (!absence?.untilDateKey) return false;
-
   // Erst 7 Tage nach dem Bis-Datum löschen:
   // Beispiel: Bis 20.06.2026 -> ab 27.06.2026 um 00 Uhr wird gelöscht.
+  // Auch alte Datensätze ohne untilDateKey werden über das sichtbare Bis-Datum geprüft.
   const deleteDateKey = getDeleteDateKeyForAbsence(absence);
 
   if (!deleteDateKey) return false;
@@ -2413,6 +2450,183 @@ async function handleAbsenceReview(interaction, absenceId, newStatus) {
 }
 
 
+function cleanAbsenceEmbedValue(value) {
+  return String(value || "")
+    .replace(/\*\*/g, "")
+    .replace(/`/g, "")
+    .trim();
+}
+
+function getAbsenceEmbedField(embed, searchText) {
+  return embed.fields?.find((field) =>
+    String(field.name || "").toLowerCase().includes(String(searchText).toLowerCase())
+  );
+}
+
+function parseAbsenceMessageForStorage(message) {
+  const embed = message.embeds?.[0];
+  if (!embed) return null;
+
+  const title = String(embed.title || "").toUpperCase();
+  const footer = String(embed.footer?.text || "").toUpperCase();
+
+  if (!title.includes("ABMELDUNG") && !footer.includes("ABMELDUNG")) {
+    return null;
+  }
+
+  const nameField = getAbsenceEmbedField(embed, "Name");
+  const periodField = getAbsenceEmbedField(embed, "Zeitraum");
+  const reasonField = getAbsenceEmbedField(embed, "Grund");
+  const submitterField = getAbsenceEmbedField(embed, "Eingereicht");
+  const statusField = getAbsenceEmbedField(embed, "Status");
+
+  const allEmbedText = [
+    embed.title || "",
+    embed.description || "",
+    ...(embed.fields || []).flatMap((field) => [field.name || "", field.value || ""]),
+    embed.footer?.text || "",
+  ].join("\n");
+
+  const periodText = String(periodField?.value || allEmbedText);
+
+  const fromMatch =
+    periodText.match(/\*\*Von:\*\*\s*([^\n]+)/i) ||
+    periodText.match(/Von:\s*\*?\s*([0-9]{1,2}[.\/\-\s][0-9]{1,2}[.\/\-\s][0-9]{2,4}|[0-9]{6,8})/i);
+
+  const untilMatch =
+    periodText.match(/\*\*Bis:\*\*\s*([^\n]+)/i) ||
+    periodText.match(/Bis:\s*\*?\s*([0-9]{1,2}[.\/\-\s][0-9]{1,2}[.\/\-\s][0-9]{2,4}|[0-9]{6,8})/i);
+
+  const fromRaw = cleanAbsenceEmbedValue(fromMatch ? fromMatch[1] : "");
+  const untilRaw = cleanAbsenceEmbedValue(untilMatch ? untilMatch[1] : "");
+  const normalizedFrom = normalizeGermanDateInput(fromRaw);
+  const normalizedUntil = normalizeGermanDateInput(untilRaw);
+
+  if (!normalizedUntil.dateKey) return null;
+
+  const submitterText = String(submitterField?.value || allEmbedText);
+  const userMatch = submitterText.match(/<@!?(\d+)>/);
+
+  const statusText = String(statusField?.value || "");
+  const reviewedByMatch = statusText.match(/<@!?(\d+)>/);
+  const status = /genehmigt/i.test(statusText)
+    ? "approved"
+    : /abgelehnt/i.test(statusText)
+      ? "rejected"
+      : "pending";
+
+  return {
+    messageId: message.id,
+    channelId: CONFIG.absenceChannelId,
+    userId: userMatch ? userMatch[1] : null,
+    name: cleanAbsenceEmbedValue(nameField?.value || "Unbekannt"),
+    from: normalizedFrom.dateKey ? normalizedFrom.text : fromRaw,
+    until: normalizedUntil.text,
+    fromDateKey: normalizedFrom.dateKey,
+    untilDateKey: normalizedUntil.dateKey,
+    reason: cleanAbsenceEmbedValue(reasonField?.value || ""),
+    status,
+    reviewedBy: reviewedByMatch ? reviewedByMatch[1] : null,
+    reviewedAt: null,
+    createdAt: message.createdAt ? message.createdAt.toISOString() : new Date().toISOString(),
+    scannedAt: new Date().toISOString(),
+  };
+}
+
+async function fetchRecentMessages(channel, maxMessages = 1000) {
+  const allMessages = [];
+  let before = null;
+
+  while (allMessages.length < maxMessages) {
+    const limit = Math.min(100, maxMessages - allMessages.length);
+    const options = before ? { limit, before } : { limit };
+    const messages = await channel.messages.fetch(options).catch(() => null);
+
+    if (!messages || messages.size === 0) break;
+
+    allMessages.push(...messages.values());
+    before = messages.last()?.id;
+
+    if (!before || messages.size < limit) break;
+  }
+
+  return allMessages;
+}
+
+async function scanExistingAbsenceMessages(maxMessages = 1000) {
+  const stats = {
+    scannedMessages: 0,
+    foundAbsences: 0,
+    saved: 0,
+    updated: 0,
+    skipped: 0,
+    failed: 0,
+  };
+
+  const channel = await client.channels.fetch(CONFIG.absenceChannelId).catch(() => null);
+
+  if (!channel || !channel.messages) {
+    stats.failed += 1;
+    return stats;
+  }
+
+  const messages = await fetchRecentMessages(channel, maxMessages);
+
+  const data = loadData();
+  if (!data.absences) data.absences = {};
+
+  for (const message of messages) {
+    stats.scannedMessages += 1;
+
+    // Der Bot soll nur Abmeldungen übernehmen, die von diesem Bot selbst gepostet wurden.
+    if (client.user?.id && message.author?.id !== client.user.id) {
+      stats.skipped += 1;
+      continue;
+    }
+
+    const parsedAbsence = parseAbsenceMessageForStorage(message);
+
+    if (!parsedAbsence) {
+      stats.skipped += 1;
+      continue;
+    }
+
+    stats.foundAbsences += 1;
+
+    const existingEntry = Object.entries(data.absences).find(
+      ([storedId, storedAbsence]) => storedId === message.id || storedAbsence?.messageId === message.id
+    );
+
+    if (existingEntry) {
+      const [storedId, storedAbsence] = existingEntry;
+      data.absences[storedId] = {
+        ...parsedAbsence,
+        ...storedAbsence,
+        messageId: storedAbsence.messageId || parsedAbsence.messageId,
+        channelId: storedAbsence.channelId || parsedAbsence.channelId,
+        userId: storedAbsence.userId || parsedAbsence.userId,
+        name: storedAbsence.name || parsedAbsence.name,
+        from: parsedAbsence.from || storedAbsence.from,
+        until: parsedAbsence.until || storedAbsence.until,
+        fromDateKey: parsedAbsence.fromDateKey || storedAbsence.fromDateKey,
+        untilDateKey: parsedAbsence.untilDateKey || storedAbsence.untilDateKey,
+        reason: storedAbsence.reason || parsedAbsence.reason,
+        status: storedAbsence.status || parsedAbsence.status || "pending",
+        reviewedBy: storedAbsence.reviewedBy || parsedAbsence.reviewedBy || null,
+        scannedAt: new Date().toISOString(),
+      };
+      stats.updated += 1;
+      continue;
+    }
+
+    data.absences[message.id] = parsedAbsence;
+    stats.saved += 1;
+  }
+
+  saveData(data);
+  return stats;
+}
+
 async function scanExistingAbsences(interaction) {
   if (!hasLeaderPermission(interaction.member)) {
     return interaction.reply({
@@ -2422,96 +2636,25 @@ async function scanExistingAbsences(interaction) {
   }
 
   await interaction.reply({
-    content: "🔍 Ich scanne den Abmeldungs-Channel und speichere erkennbare Abmeldungen nachträglich.",
+    content: "🔍 Ich scanne den Abmeldungs-Channel und speichere erkennbare Bot-Abmeldungen nachträglich.",
     ephemeral: true,
   });
 
-  const channel = await client.channels.fetch(CONFIG.absenceChannelId).catch(() => null);
-
-  if (!channel || !channel.messages) {
-    return interaction.followUp({
-      content: "❌ Der Abmeldungs-Channel wurde nicht gefunden.",
-      ephemeral: true,
-    });
-  }
-
-  const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
-
-  if (!messages) {
-    return interaction.followUp({
-      content: "❌ Nachrichten konnten nicht geladen werden.",
-      ephemeral: true,
-    });
-  }
-
-  const data = loadData();
-  if (!data.absences) data.absences = {};
-
-  let scanned = 0;
-  let saved = 0;
-  let skipped = 0;
-
-  for (const message of messages.values()) {
-    const embed = message.embeds?.[0];
-
-    if (!embed || !String(embed.title || "").includes("ABMELDUNG")) continue;
-
-    scanned += 1;
-
-    if (data.absences[message.id]) {
-      skipped += 1;
-      continue;
-    }
-
-    const nameField = embed.fields?.find((field) => field.name?.includes("Name"));
-    const periodField = embed.fields?.find((field) => field.name?.includes("Zeitraum"));
-    const submitterField = embed.fields?.find((field) => field.name?.includes("Eingereicht"));
-
-    const name = nameField?.value || "Unbekannt";
-    const periodText = periodField?.value || "";
-    const untilMatch = periodText.match(/\*\*Bis:\*\*\s*([^\n]+)/i);
-    const fromMatch = periodText.match(/\*\*Von:\*\*\s*([^\n]+)/i);
-    const userMatch = String(submitterField?.value || "").match(/<@(\d+)>/);
-
-    const untilRaw = untilMatch ? untilMatch[1].trim() : "";
-    const fromRaw = fromMatch ? fromMatch[1].trim() : "";
-    const normalizedUntil = normalizeGermanDateInput(untilRaw);
-    const normalizedFrom = normalizeGermanDateInput(fromRaw);
-    const untilDateKey = normalizedUntil.dateKey;
-    const fromDateKey = normalizedFrom.dateKey;
-
-    if (!untilDateKey) {
-      skipped += 1;
-      continue;
-    }
-
-    data.absences[message.id] = {
-      messageId: message.id,
-      channelId: CONFIG.absenceChannelId,
-      userId: userMatch ? userMatch[1] : null,
-      name,
-      from: fromDateKey ? normalizedFrom.text : fromRaw,
-      until: normalizedUntil.text,
-      fromDateKey,
-      untilDateKey,
-      createdAt: message.createdAt ? message.createdAt.toISOString() : new Date().toISOString(),
-      scannedAt: new Date().toISOString(),
-    };
-
-    saved += 1;
-  }
-
-  saveData(data);
+  const scanStats = await scanExistingAbsenceMessages(1000);
 
   return interaction.followUp({
     content: [
       "✅ Abmeldungs-Scan abgeschlossen.",
       "",
-      `🔍 Gefundene Abmeldungen: **${scanned}**`,
-      `✅ Neu gespeichert: **${saved}**`,
-      `ℹ️ Übersprungen: **${skipped}**`,
+      `🔎 Gescannte Nachrichten: **${scanStats.scannedMessages}**`,
+      `📋 Erkannte Abmeldungen: **${scanStats.foundAbsences}**`,
+      `✅ Neu gespeichert: **${scanStats.saved}**`,
+      `🔁 Aktualisiert: **${scanStats.updated}**`,
+      `ℹ️ Übersprungen: **${scanStats.skipped}**`,
+      `⚠️ Fehler: **${scanStats.failed}**`,
       "",
-      "Gespeicherte Abmeldungen werden jetzt ebenfalls nach der 7-Tage-Regel automatisch gelöscht.",
+      "Gespeicherte Abmeldungen werden nach der 7-Tage-Regel automatisch gelöscht.",
+      "Mit `/abmeldungen-loeschcheck` kannst du danach sofort löschen lassen, was bereits fällig ist.",
     ].join("\n"),
     ephemeral: true,
   });
@@ -4626,7 +4769,8 @@ async function showHelp(interaction) {
         "",
         "**📋 Abmeldungen**",
         "`/abmeldungen` — aktive Abmeldungen anzeigen",
-        "`/abmeldungen-scan` — alte Abmeldungen nachträglich speichern",
+        "`/abmeldungen-scan` — alte Bot-Abmeldungen nachträglich speichern",
+        "`/abmeldungen-loeschcheck` — alte Bot-Abmeldungen scannen und fällige sofort löschen",
         "",
         "**🛠️ Verwaltung**",
         "`/leaderpanel` — Leaderpanel senden",
@@ -4810,35 +4954,73 @@ async function postDailyReport(reason = "scheduled") {
   saveData(data);
 }
 
-async function checkAbsenceDeletions() {
+async function checkAbsenceDeletions(reason = "scheduled") {
   const now = getBerlinParts();
-
-  // Abmeldungen werden bewusst nur nachts um 00 Uhr geprüft.
-  // Da der Scheduler jede Minute läuft, bedeutet das: zwischen 00:00 und 00:59.
-  if (now.hour !== "00") return;
-
   const data = loadData();
+  const stats = {
+    checked: 0,
+    repaired: 0,
+    deleted: 0,
+    skipped: 0,
+    failed: 0,
+  };
 
-  if (!data.absences || Object.keys(data.absences).length === 0) return;
+  if (!data.absences || Object.keys(data.absences).length === 0) return stats;
 
   let changed = false;
 
   for (const [absenceId, absence] of Object.entries(data.absences)) {
-    if (!shouldDeleteAbsence(absence, now.dateKey)) continue;
+    stats.checked += 1;
+
+    if (repairAbsenceDateKeys(absence)) {
+      data.absences[absenceId] = absence;
+      stats.repaired += 1;
+      changed = true;
+    }
+
+    const deleteDateKey = getDeleteDateKeyForAbsence(absence);
+
+    if (!deleteDateKey) {
+      stats.skipped += 1;
+      console.warn(`⚠️ Abmeldung ohne erkennbares Bis-Datum: ${absence.name || absence.userId || absenceId}`);
+      continue;
+    }
+
+    if (now.dateKey < deleteDateKey) {
+      stats.skipped += 1;
+      continue;
+    }
 
     const channel = await client.channels.fetch(absence.channelId || CONFIG.absenceChannelId).catch(() => null);
 
     if (!channel || !channel.messages) {
-      console.error(`❌ Abmeldungs-Channel nicht gefunden: ${absence.channelId || CONFIG.absenceChannelId}`);
+      stats.failed += 1;
+      const message = `Abmeldungs-Channel nicht gefunden: ${absence.channelId || CONFIG.absenceChannelId}`;
+      console.error(`❌ ${message}`);
+      await sendErrorLog("Abmeldungs-Löschung fehlgeschlagen", new Error(message), [
+        `Abmeldung: ${absence.name || absence.userId || absenceId}`,
+        `Bis: ${absence.until || "—"}`,
+      ]);
       continue;
     }
 
-    const message = await channel.messages.fetch(absence.messageId).catch(() => null);
+    const message = absence.messageId
+      ? await channel.messages.fetch(absence.messageId).catch(() => null)
+      : null;
 
     if (message) {
-      await message.delete().catch((error) => {
+      try {
+        await message.delete();
+      } catch (error) {
+        stats.failed += 1;
         console.error(`❌ Abmeldung ${absence.messageId} konnte nicht gelöscht werden:`, error.message);
-      });
+        await sendErrorLog("Abmeldungs-Löschung fehlgeschlagen", error, [
+          `Abmeldung: ${absence.name || absence.userId || absenceId}`,
+          `Nachricht: ${absence.messageId || "—"}`,
+          `Bis: ${absence.until || "—"}`,
+        ]);
+        continue;
+      }
     }
 
     await sendToChannel(CONFIG.sanctionLogChannelId, {
@@ -4854,6 +5036,8 @@ async function checkAbsenceDeletions() {
               `📅 **Von:** ${absence.from || "—"}`,
               `📅 **Bis:** ${absence.until || "—"}`,
               `🗑️ **Gelöscht am:** ${formatGermanDateTimeFromMs(Date.now())}`,
+              message ? null : "ℹ️ **Hinweis:** Die Discord-Nachricht war bereits nicht mehr vorhanden, der Speicher wurde bereinigt.",
+              `📝 **Auslöser:** ${reason}`,
               "━━━━━━━━━━━━━━━━━━━━",
             ].filter(Boolean).join("\n")
           )
@@ -4863,14 +5047,55 @@ async function checkAbsenceDeletions() {
     });
 
     delete data.absences[absenceId];
+    stats.deleted += 1;
     changed = true;
 
     console.log(`🧹 Abmeldung automatisch gelöscht/entfernt: ${absence.name || absence.userId || absenceId}`);
   }
 
   if (changed) saveData(data);
+
+  return stats;
 }
 
+async function runManualAbsenceDeletionCheck(interaction) {
+  if (!hasLeaderPermission(interaction.member)) {
+    return interaction.reply({
+      content: "❌ Du hast keine Berechtigung für diesen Befehl.",
+      ephemeral: true,
+    });
+  }
+
+  await interaction.reply({
+    content: "🧹 Ich scanne jetzt alte Bot-Abmeldungen, speichere sie nach und lösche alles, was nach der 7-Tage-Regel fällig ist ...",
+    ephemeral: true,
+  });
+
+  const scanStats = await scanExistingAbsenceMessages(1000);
+  const stats = await checkAbsenceDeletions(`Manuell von ${interaction.user.tag}`);
+
+  return interaction.followUp({
+    content: [
+      "✅ Abmeldungs-Löschprüfung abgeschlossen.",
+      "",
+      "**Vorheriger Channel-Scan:**",
+      `🔎 Gescannte Nachrichten: **${scanStats.scannedMessages}**`,
+      `📋 Erkannte Abmeldungen: **${scanStats.foundAbsences}**`,
+      `✅ Neu gespeichert: **${scanStats.saved}**`,
+      `🔁 Aktualisiert: **${scanStats.updated}**`,
+      `ℹ️ Übersprungen: **${scanStats.skipped}**`,
+      `⚠️ Scan-Fehler: **${scanStats.failed}**`,
+      "",
+      "**Löschprüfung:**",
+      `🔎 Geprüft: **${stats.checked}**`,
+      `🛠️ Datum repariert: **${stats.repaired}**`,
+      `🧹 Gelöscht/bereinigt: **${stats.deleted}**`,
+      `⏳ Noch nicht fällig/übersprungen: **${stats.skipped}**`,
+      `⚠️ Lösch-Fehler: **${stats.failed}**`,
+    ].join("\n"),
+    ephemeral: true,
+  });
+}
 
 // =====================================================
 // SCHEDULER
@@ -5024,7 +5249,13 @@ async function registerCommands() {
 
     new SlashCommandBuilder()
       .setName("abmeldungen-scan")
-      .setDescription("Scannt alte Abmeldungen und speichert sie für die Auto-Löschung")
+      .setDescription("Scannt alte Bot-Abmeldungen und speichert sie für die Auto-Löschung")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .toJSON(),
+
+    new SlashCommandBuilder()
+      .setName("abmeldungen-loeschcheck")
+      .setDescription("Scannt alte Bot-Abmeldungen und löscht fällige sofort")
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
       .toJSON(),
 
@@ -5362,6 +5593,10 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.isChatInputCommand() && interaction.commandName === "abmeldungen-scan") {
       return scanExistingAbsences(interaction);
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === "abmeldungen-loeschcheck") {
+      return runManualAbsenceDeletionCheck(interaction);
     }
 
     if (interaction.isChatInputCommand() && interaction.commandName === "smv-status") {
