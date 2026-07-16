@@ -77,6 +77,7 @@ const CONFIG = {
 
   // Familienpanel / Abmeldung
   absenceChannelId: "1522813672244908135",
+  absenceDeleteLogChannelId: "1527182554640420904",
 
   // Wochenabgabe / Zahlende/r Rollenautomatik
   familyMemberRoleId: "1451314176004984912",
@@ -558,6 +559,42 @@ function normalizeGermanDateInput(input) {
     dateKey,
     text: formatDateKeyGerman(dateKey),
   };
+}
+
+function validateNewAbsenceDateInput(value, fieldLabel) {
+  const input = String(value || "").trim();
+
+  if (!input) {
+    return {
+      ok: false,
+      message: `❌ Das Feld **${fieldLabel}** ist ein Pflichtfeld. Bitte trage ein Datum im Format \`TT.MM.JJJJ\` ein.`,
+    };
+  }
+
+  if (/[A-Za-zÄÖÜäöüß]/.test(input)) {
+    return {
+      ok: false,
+      message: `❌ Im Feld **${fieldLabel}** sind keine Buchstaben erlaubt. Bitte nutze nur Zahlen im Format \`TT.MM.JJJJ\`.`,
+    };
+  }
+
+  if (/[^0-9.\/\-\s]/.test(input)) {
+    return {
+      ok: false,
+      message: `❌ Im Feld **${fieldLabel}** sind nur Zahlen und normale Datumstrennzeichen erlaubt. Bitte nutze das Format \`TT.MM.JJJJ\`.`,
+    };
+  }
+
+  const digitsOnly = input.replace(/\D/g, "");
+
+  if (digitsOnly.length !== 8) {
+    return {
+      ok: false,
+      message: `❌ Das Feld **${fieldLabel}** muss ein vollständiges Datum enthalten. Bitte nutze \`TT.MM.JJJJ\` oder \`TTMMJJJJ\`.`,
+    };
+  }
+
+  return { ok: true, message: null };
 }
 
 function addDaysToDateKey(dateKey, days = 0) {
@@ -2232,7 +2269,7 @@ function createAbsenceModal(prefilledName = "") {
     .setLabel("Von")
     .setPlaceholder("TT.MM.JJJJ")
     .setStyle(TextInputStyle.Short)
-    .setMinLength(6)
+    .setMinLength(8)
     .setMaxLength(20)
     .setRequired(true);
 
@@ -2241,7 +2278,7 @@ function createAbsenceModal(prefilledName = "") {
     .setLabel("Bis")
     .setPlaceholder("TT.MM.JJJJ")
     .setStyle(TextInputStyle.Short)
-    .setMinLength(6)
+    .setMinLength(8)
     .setMaxLength(20)
     .setRequired(true);
 
@@ -2365,6 +2402,16 @@ async function postAbsence(interaction) {
   const fromRaw = interaction.fields.getTextInputValue("absence_from").trim();
   const untilRaw = interaction.fields.getTextInputValue("absence_until").trim();
   const reason = interaction.fields.getTextInputValue("absence_reason").trim();
+
+  const fromValidation = validateNewAbsenceDateInput(fromRaw, "Von");
+  const untilValidation = validateNewAbsenceDateInput(untilRaw, "Bis");
+
+  if (!fromValidation.ok || !untilValidation.ok) {
+    return interaction.reply({
+      content: [fromValidation.message, untilValidation.message].filter(Boolean).join("\n"),
+      ephemeral: true,
+    });
+  }
 
   const normalizedFrom = normalizeGermanDateInput(fromRaw);
   const normalizedUntil = normalizeGermanDateInput(untilRaw);
@@ -5060,7 +5107,7 @@ async function checkAbsenceDeletions(reason = "scheduled") {
       }
     }
 
-    await sendToChannel(CONFIG.sanctionLogChannelId, {
+    await sendToChannel(CONFIG.absenceDeleteLogChannelId, {
       embeds: [
         new EmbedBuilder()
           .setColor(CONFIG.warningColor)
