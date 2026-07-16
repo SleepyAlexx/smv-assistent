@@ -2156,7 +2156,7 @@ function createAbsenceModal(prefilledName = "") {
   const fromInput = new TextInputBuilder()
     .setCustomId("absence_from")
     .setLabel("Von")
-    .setPlaceholder("z. B. 16.07.2026 oder 16072026")
+    .setPlaceholder("TT.MM.JJJJ")
     .setStyle(TextInputStyle.Short)
     .setMinLength(6)
     .setMaxLength(20)
@@ -2165,7 +2165,7 @@ function createAbsenceModal(prefilledName = "") {
   const untilInput = new TextInputBuilder()
     .setCustomId("absence_until")
     .setLabel("Bis")
-    .setPlaceholder("z. B. 20.07.2026 oder 20072026")
+    .setPlaceholder("TT.MM.JJJJ")
     .setStyle(TextInputStyle.Short)
     .setMinLength(6)
     .setMaxLength(20)
@@ -2300,7 +2300,7 @@ async function postAbsence(interaction) {
       content: [
         "❌ Bitte gib ein gültiges Datum ein.",
         "",
-        "Erlaubte Formate sind z. B. `16.07.2026`, `16/07/2026`, `16-07-2026` oder `16072026`.",
+        "Bitte nutze das Format `TT.MM.JJJJ`.",
       ].join("\n"),
       ephemeral: true,
     });
