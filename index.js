@@ -471,27 +471,64 @@ function getBerlinParts(date = new Date()) {
   };
 }
 
+function normalizeAbsenceYear(rawYear) {
+  const digits = String(rawYear || "").replace(/\D/g, "");
+
+  if (!digits) return null;
+
+  if (digits.length === 2) {
+    return `20${digits}`;
+  }
+
+  if (digits.length === 4) {
+    return digits;
+  }
+
+  // Alte Abmeldungen können durch frühere Eingaben/Formatierungen z. B. 20206 statt 2026 enthalten.
+  // Dafür werden 5-stellige Jahreszahlen automatisch auf das plausibelste 4-stellige Jahr repariert.
+  if (digits.length > 4) {
+    const currentYear = Number(getBerlinParts().year) || new Date().getFullYear();
+    const candidates = new Set();
+
+    for (let i = 0; i < digits.length; i++) {
+      const candidate = `${digits.slice(0, i)}${digits.slice(i + 1)}`;
+      if (/^20\d{2}$/.test(candidate)) {
+        candidates.add(candidate);
+      }
+    }
+
+    if (candidates.size > 0) {
+      return [...candidates].sort((a, b) => Math.abs(Number(a) - currentYear) - Math.abs(Number(b) - currentYear))[0];
+    }
+  }
+
+  return null;
+}
+
 function parseGermanDateKey(input) {
-  const value = String(input || "").trim();
+  const value = String(input || "")
+    .trim()
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/[*_`~]/g, "");
+
   if (!value) return null;
 
   // Erlaubte Eingaben:
-  // 16.07.2026, 16/07/2026, 16-07-2026, 16 07 2026, 16072026, 16.7.26
-  let match = value.match(/^(\d{1,2})\D+(\d{1,2})\D+(\d{2}|\d{4})$/);
+  // TT.MM.JJJJ, TT/MM/JJJJ, TT-MM-JJJJ, TT MM JJJJ, TTMMJJJJ, TT.M.JJ
+  // Zusätzlich werden alte Tippfehler wie 04.07.20206 automatisch zu 04.07.2026 repariert.
+  let match = value.match(/(\d{1,2})\D+(\d{1,2})\D+(\d{2,5})/);
 
   if (!match) {
-    match = value.match(/^(\d{2})(\d{2})(\d{2}|\d{4})$/);
+    match = value.match(/^(\d{2})(\d{2})(\d{2,5})$/);
   }
 
   if (!match) return null;
 
   const day = String(Number(match[1])).padStart(2, "0");
   const month = String(Number(match[2])).padStart(2, "0");
-  let year = String(match[3]);
+  const year = normalizeAbsenceYear(match[3]);
 
-  if (year.length === 2) {
-    year = `20${year}`;
-  }
+  if (!year) return null;
 
   const date = new Date(`${year}-${month}-${day}T12:00:00Z`);
 
@@ -2491,11 +2528,11 @@ function parseAbsenceMessageForStorage(message) {
 
   const fromMatch =
     periodText.match(/\*\*Von:\*\*\s*([^\n]+)/i) ||
-    periodText.match(/Von:\s*\*?\s*([0-9]{1,2}[.\/\-\s][0-9]{1,2}[.\/\-\s][0-9]{2,4}|[0-9]{6,8})/i);
+    periodText.match(/Von:\s*\*?\s*([0-9]{1,2}[.\/\-\s][0-9]{1,2}[.\/\-\s][0-9]{2,5}|[0-9]{6,9})/i);
 
   const untilMatch =
     periodText.match(/\*\*Bis:\*\*\s*([^\n]+)/i) ||
-    periodText.match(/Bis:\s*\*?\s*([0-9]{1,2}[.\/\-\s][0-9]{1,2}[.\/\-\s][0-9]{2,4}|[0-9]{6,8})/i);
+    periodText.match(/Bis:\s*\*?\s*([0-9]{1,2}[.\/\-\s][0-9]{1,2}[.\/\-\s][0-9]{2,5}|[0-9]{6,9})/i);
 
   const fromRaw = cleanAbsenceEmbedValue(fromMatch ? fromMatch[1] : "");
   const untilRaw = cleanAbsenceEmbedValue(untilMatch ? untilMatch[1] : "");
@@ -5123,9 +5160,12 @@ function startSchedulers() {
     console.error("❌ Fehler bei erster Aufstellungs-Schließprüfung:", error);
   });
 
-  checkAbsenceDeletions().catch((error) => {
-    console.error("❌ Fehler bei erster Abmeldungs-Löschprüfung:", error);
-  });
+  scanExistingAbsenceMessages(1000)
+    .then(() => checkAbsenceDeletions("Bot-Start-Prüfung mit Channel-Scan"))
+    .catch((error) => {
+      console.error("❌ Fehler bei erster Abmeldungs-Löschprüfung:", error);
+      sendErrorLog("Abmeldungs-Löschprüfung fehlgeschlagen", error);
+    });
 
   postDailyReport("Bot-Start-Prüfung").catch((error) => {
     console.error("❌ Fehler bei erster Tagesprotokoll-Prüfung:", error);
