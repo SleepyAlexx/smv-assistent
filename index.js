@@ -472,12 +472,26 @@ function getBerlinParts(date = new Date()) {
 }
 
 function parseGermanDateKey(input) {
-  const match = String(input || "").trim().match(/^(\d{1,2})[.](\d{1,2})[.](\d{4})$/);
+  const value = String(input || "").trim();
+  if (!value) return null;
+
+  // Erlaubte Eingaben:
+  // 16.07.2026, 16/07/2026, 16-07-2026, 16 07 2026, 16072026, 16.7.26
+  let match = value.match(/^(\d{1,2})\D+(\d{1,2})\D+(\d{2}|\d{4})$/);
+
+  if (!match) {
+    match = value.match(/^(\d{2})(\d{2})(\d{2}|\d{4})$/);
+  }
+
   if (!match) return null;
 
   const day = String(Number(match[1])).padStart(2, "0");
   const month = String(Number(match[2])).padStart(2, "0");
-  const year = match[3];
+  let year = String(match[3]);
+
+  if (year.length === 2) {
+    year = `20${year}`;
+  }
 
   const date = new Date(`${year}-${month}-${day}T12:00:00Z`);
 
@@ -491,6 +505,22 @@ function parseGermanDateKey(input) {
   }
 
   return `${year}-${month}-${day}`;
+}
+
+function normalizeGermanDateInput(input) {
+  const dateKey = parseGermanDateKey(input);
+
+  if (!dateKey) {
+    return {
+      dateKey: null,
+      text: String(input || "").trim(),
+    };
+  }
+
+  return {
+    dateKey,
+    text: formatDateKeyGerman(dateKey),
+  };
 }
 
 function addDaysToDateKey(dateKey, days = 0) {
@@ -2126,18 +2156,18 @@ function createAbsenceModal(prefilledName = "") {
   const fromInput = new TextInputBuilder()
     .setCustomId("absence_from")
     .setLabel("Von")
-    .setPlaceholder("TT.MM.JJJJ")
+    .setPlaceholder("z. B. 16.07.2026 oder 16072026")
     .setStyle(TextInputStyle.Short)
-    .setMinLength(8)
+    .setMinLength(6)
     .setMaxLength(20)
     .setRequired(true);
 
   const untilInput = new TextInputBuilder()
     .setCustomId("absence_until")
     .setLabel("Bis")
-    .setPlaceholder("TT.MM.JJJJ")
+    .setPlaceholder("z. B. 20.07.2026 oder 20072026")
     .setStyle(TextInputStyle.Short)
-    .setMinLength(8)
+    .setMinLength(6)
     .setMaxLength(20)
     .setRequired(true);
 
@@ -2204,13 +2234,13 @@ function createAbsenceEmbed(absence) {
         inline: false,
       },
       {
-        name: "📌 Status",
-        value: getAbsenceStatusText(absence),
+        name: "📨 Eingereicht von",
+        value: `<@${absence.userId}>`,
         inline: false,
       },
       {
-        name: "📨 Eingereicht von",
-        value: `<@${absence.userId}>`,
+        name: "📌 Status",
+        value: getAbsenceStatusText(absence),
         inline: false,
       }
     )
@@ -2258,11 +2288,36 @@ async function updateAbsenceMessage(absenceId, absence) {
 async function postAbsence(interaction) {
   const submittedName = interaction.fields.getTextInputValue("absence_name").trim();
   const name = getAbsencePrefilledName(interaction.member, interaction.user) || submittedName;
-  const from = interaction.fields.getTextInputValue("absence_from").trim();
-  const until = interaction.fields.getTextInputValue("absence_until").trim();
+  const fromRaw = interaction.fields.getTextInputValue("absence_from").trim();
+  const untilRaw = interaction.fields.getTextInputValue("absence_until").trim();
   const reason = interaction.fields.getTextInputValue("absence_reason").trim();
+
+  const normalizedFrom = normalizeGermanDateInput(fromRaw);
+  const normalizedUntil = normalizeGermanDateInput(untilRaw);
+
+  if (!normalizedFrom.dateKey || !normalizedUntil.dateKey) {
+    return interaction.reply({
+      content: [
+        "❌ Bitte gib ein gültiges Datum ein.",
+        "",
+        "Erlaubte Formate sind z. B. `16.07.2026`, `16/07/2026`, `16-07-2026` oder `16072026`.",
+      ].join("\n"),
+      ephemeral: true,
+    });
+  }
+
+  if (normalizedUntil.dateKey < normalizedFrom.dateKey) {
+    return interaction.reply({
+      content: "❌ Das **Bis-Datum** darf nicht vor dem **Von-Datum** liegen. Bitte kontrolliere deine Abmeldung nochmal.",
+      ephemeral: true,
+    });
+  }
+
+  const from = normalizedFrom.text;
+  const until = normalizedUntil.text;
+  const fromDateKey = normalizedFrom.dateKey;
+  const untilDateKey = normalizedUntil.dateKey;
   const absenceId = createShortId();
-  const untilDateKey = parseGermanDateKey(until);
 
   const absence = {
     id: absenceId,
@@ -2272,8 +2327,11 @@ async function postAbsence(interaction) {
     name,
     from,
     until,
-    reason,
+    fromDateKey,
     untilDateKey,
+    originalFromInput: fromRaw,
+    originalUntilInput: untilRaw,
+    reason,
     status: "pending",
     reviewedBy: null,
     reviewedAt: null,
@@ -2302,10 +2360,12 @@ async function postAbsence(interaction) {
 
   saveData(data);
 
+  const correctedHint = fromRaw !== from || untilRaw !== until
+    ? `\n🛠️ Datum automatisch korrigiert auf: **${from}** bis **${until}**.`
+    : "";
+
   return interaction.reply({
-    content: untilDateKey
-      ? `✅ Deine Abmeldung wurde erfolgreich in <#${CONFIG.absenceChannelId}> eingereicht. Sie wird automatisch 7 Tage nach dem Bis-Datum um 00 Uhr gelöscht.`
-      : `✅ Deine Abmeldung wurde erfolgreich in <#${CONFIG.absenceChannelId}> eingereicht. ⚠️ Das Bis-Datum konnte nicht sauber erkannt werden, daher wird diese Abmeldung nicht automatisch gelöscht.`,
+    content: `✅ Deine Abmeldung wurde erfolgreich in <#${CONFIG.absenceChannelId}> eingereicht. Sie wird automatisch 7 Tage nach dem Bis-Datum um 00 Uhr gelöscht.${correctedHint}`,
     ephemeral: true,
   });
 }
@@ -2413,9 +2473,12 @@ async function scanExistingAbsences(interaction) {
     const fromMatch = periodText.match(/\*\*Von:\*\*\s*([^\n]+)/i);
     const userMatch = String(submitterField?.value || "").match(/<@(\d+)>/);
 
-    const until = untilMatch ? untilMatch[1].trim() : "";
-    const from = fromMatch ? fromMatch[1].trim() : "";
-    const untilDateKey = parseGermanDateKey(until);
+    const untilRaw = untilMatch ? untilMatch[1].trim() : "";
+    const fromRaw = fromMatch ? fromMatch[1].trim() : "";
+    const normalizedUntil = normalizeGermanDateInput(untilRaw);
+    const normalizedFrom = normalizeGermanDateInput(fromRaw);
+    const untilDateKey = normalizedUntil.dateKey;
+    const fromDateKey = normalizedFrom.dateKey;
 
     if (!untilDateKey) {
       skipped += 1;
@@ -2427,8 +2490,9 @@ async function scanExistingAbsences(interaction) {
       channelId: CONFIG.absenceChannelId,
       userId: userMatch ? userMatch[1] : null,
       name,
-      from,
-      until,
+      from: fromDateKey ? normalizedFrom.text : fromRaw,
+      until: normalizedUntil.text,
+      fromDateKey,
       untilDateKey,
       createdAt: message.createdAt ? message.createdAt.toISOString() : new Date().toISOString(),
       scannedAt: new Date().toISOString(),
