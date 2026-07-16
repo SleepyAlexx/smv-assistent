@@ -2100,7 +2100,12 @@ function createFamilyPanelButtons() {
   );
 }
 
-function createAbsenceModal() {
+function getAbsencePrefilledName(member, user) {
+  const name = member?.nickname || member?.displayName || user?.globalName || user?.username || "";
+  return String(name || "").trim().slice(0, 60);
+}
+
+function createAbsenceModal(prefilledName = "") {
   const modal = new ModalBuilder()
     .setCustomId("absence_modal")
     .setTitle("📋 Abmeldung erstellen");
@@ -2113,6 +2118,10 @@ function createAbsenceModal() {
     .setMinLength(2)
     .setMaxLength(60)
     .setRequired(true);
+
+  if (prefilledName) {
+    nameInput.setValue(prefilledName);
+  }
 
   const fromInput = new TextInputBuilder()
     .setCustomId("absence_from")
@@ -2151,61 +2160,129 @@ function createAbsenceModal() {
   return modal;
 }
 
-function createAbsenceEmbed({ name, from, until, reason, userId }) {
+function getAbsenceStatusText(absence) {
+  if (absence.status === "approved") {
+    const reviewedAt = absence.reviewedAt ? ` am <t:${unixTimestamp(absence.reviewedAt)}:F>` : "";
+    return `✅ Genehmigt von <@${absence.reviewedBy}>${reviewedAt}`;
+  }
+
+  if (absence.status === "rejected") {
+    const reviewedAt = absence.reviewedAt ? ` am <t:${unixTimestamp(absence.reviewedAt)}:F>` : "";
+    return `❌ Abgelehnt von <@${absence.reviewedBy}>${reviewedAt}`;
+  }
+
+  return "⏳ Wartet auf Entscheidung der Leaderschaft";
+}
+
+function createAbsenceEmbed(absence) {
+  const status = absence.status || "pending";
+
   return new EmbedBuilder()
-    .setColor(CONFIG.warningColor)
+    .setColor(status === "approved" ? CONFIG.successColor : status === "rejected" ? CONFIG.dangerColor : CONFIG.warningColor)
     .setTitle("📋 • ABMELDUNG")
     .setDescription(
       [
         "━━━━━━━━━━━━━━━━━━━━",
-        `**${name}** hat eine Abmeldung eingereicht.`,
+        `**${absence.name}** hat eine Abmeldung eingereicht.`,
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
     )
     .addFields(
       {
         name: "👤 Name",
-        value: name,
+        value: absence.name || "—",
         inline: true,
       },
       {
         name: "📅 Zeitraum",
-        value: `**Von:** ${from}\n**Bis:** ${until}`,
+        value: `**Von:** ${absence.from || "—"}\n**Bis:** ${absence.until || "—"}`,
         inline: true,
       },
       {
         name: "📝 Grund",
-        value: reason,
+        value: absence.reason || "—",
+        inline: false,
+      },
+      {
+        name: "📌 Status",
+        value: getAbsenceStatusText(absence),
         inline: false,
       },
       {
         name: "📨 Eingereicht von",
-        value: `<@${userId}>`,
+        value: `<@${absence.userId}>`,
         inline: false,
       }
     )
-    .setTimestamp()
+    .setTimestamp(absence.createdAt ? new Date(absence.createdAt) : new Date())
     .setFooter({
       text: `${CONFIG.shortName} • Abmeldung`,
     });
 }
 
+function createAbsenceReviewButtons(absenceId, status = "pending") {
+  const closed = status !== "pending";
+
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`absence_approve_${absenceId}`)
+      .setLabel("Genehmigt")
+      .setEmoji("✅")
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(closed),
+
+    new ButtonBuilder()
+      .setCustomId(`absence_reject_${absenceId}`)
+      .setLabel("Abgelehnt")
+      .setEmoji("❌")
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(closed)
+  );
+}
+
+async function updateAbsenceMessage(absenceId, absence) {
+  const channel = await client.channels.fetch(absence.channelId || CONFIG.absenceChannelId).catch(() => null);
+  if (!channel) return false;
+
+  const message = await channel.messages.fetch(absence.messageId).catch(() => null);
+  if (!message) return false;
+
+  await message.edit({
+    embeds: [createAbsenceEmbed(absence)],
+    components: [createAbsenceReviewButtons(absenceId, absence.status || "pending")],
+  });
+
+  return true;
+}
+
 async function postAbsence(interaction) {
-  const name = interaction.fields.getTextInputValue("absence_name").trim();
+  const submittedName = interaction.fields.getTextInputValue("absence_name").trim();
+  const name = getAbsencePrefilledName(interaction.member, interaction.user) || submittedName;
   const from = interaction.fields.getTextInputValue("absence_from").trim();
   const until = interaction.fields.getTextInputValue("absence_until").trim();
   const reason = interaction.fields.getTextInputValue("absence_reason").trim();
+  const absenceId = createShortId();
+  const untilDateKey = parseGermanDateKey(until);
+
+  const absence = {
+    id: absenceId,
+    messageId: null,
+    channelId: CONFIG.absenceChannelId,
+    userId: interaction.user.id,
+    name,
+    from,
+    until,
+    reason,
+    untilDateKey,
+    status: "pending",
+    reviewedBy: null,
+    reviewedAt: null,
+    createdAt: new Date().toISOString(),
+  };
 
   const message = await sendToChannel(CONFIG.absenceChannelId, {
-    embeds: [
-      createAbsenceEmbed({
-        name,
-        from,
-        until,
-        reason,
-        userId: interaction.user.id,
-      }),
-    ],
+    embeds: [createAbsenceEmbed(absence)],
+    components: [createAbsenceReviewButtons(absenceId, "pending")],
   });
 
   if (!message) {
@@ -2215,31 +2292,62 @@ async function postAbsence(interaction) {
     });
   }
 
-  const untilDateKey = parseGermanDateKey(until);
+  absence.messageId = message.id;
 
-  if (untilDateKey) {
-    const data = loadData();
+  const data = loadData();
 
-    if (!data.absences) data.absences = {};
+  if (!data.absences) data.absences = {};
 
-    data.absences[message.id] = {
-      messageId: message.id,
-      channelId: CONFIG.absenceChannelId,
-      userId: interaction.user.id,
-      name,
-      from,
-      until,
-      untilDateKey,
-      createdAt: new Date().toISOString(),
-    };
+  data.absences[absenceId] = absence;
 
-    saveData(data);
-  }
+  saveData(data);
 
   return interaction.reply({
     content: untilDateKey
       ? `✅ Deine Abmeldung wurde erfolgreich in <#${CONFIG.absenceChannelId}> eingereicht. Sie wird automatisch 7 Tage nach dem Bis-Datum um 00 Uhr gelöscht.`
       : `✅ Deine Abmeldung wurde erfolgreich in <#${CONFIG.absenceChannelId}> eingereicht. ⚠️ Das Bis-Datum konnte nicht sauber erkannt werden, daher wird diese Abmeldung nicht automatisch gelöscht.`,
+    ephemeral: true,
+  });
+}
+
+async function handleAbsenceReview(interaction, absenceId, newStatus) {
+  if (!hasLeaderPermission(interaction.member)) {
+    return interaction.reply({
+      content: "❌ Du hast keine Berechtigung, Abmeldungen zu genehmigen oder abzulehnen.",
+      ephemeral: true,
+    });
+  }
+
+  const data = loadData();
+  const absence = data.absences?.[absenceId];
+
+  if (!absence) {
+    return interaction.reply({
+      content: "❌ Diese Abmeldung wurde nicht im Speicher gefunden.",
+      ephemeral: true,
+    });
+  }
+
+  if ((absence.status || "pending") !== "pending") {
+    return interaction.reply({
+      content: `ℹ️ Diese Abmeldung wurde bereits bearbeitet: ${getAbsenceStatusText(absence)}`,
+      ephemeral: true,
+    });
+  }
+
+  absence.status = newStatus;
+  absence.reviewedBy = interaction.user.id;
+  absence.reviewedAt = Date.now();
+
+  data.absences[absenceId] = absence;
+  saveData(data);
+
+  const updated = await updateAbsenceMessage(absenceId, absence);
+
+  return interaction.reply({
+    content: updated
+      ? `✅ Abmeldung wurde ${newStatus === "approved" ? "genehmigt" : "abgelehnt"}.`
+      : `✅ Abmeldung wurde ${newStatus === "approved" ? "genehmigt" : "abgelehnt"}, aber die Nachricht konnte nicht aktualisiert werden.`,
     ephemeral: true,
   });
 }
@@ -5235,7 +5343,7 @@ client.on("interactionCreate", async (interaction) => {
     // -------------------------------
 
     if (interaction.isButton() && interaction.customId === "family_absence") {
-      return interaction.showModal(createAbsenceModal());
+      return interaction.showModal(createAbsenceModal(getAbsencePrefilledName(interaction.member, interaction.user)));
     }
 
     if (interaction.isButton() && interaction.customId === "family_weekly_payment") {
@@ -5294,6 +5402,16 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.isModalSubmit() && interaction.customId === "absence_modal") {
       return postAbsence(interaction);
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith("absence_approve_")) {
+      const absenceId = interaction.customId.replace("absence_approve_", "");
+      return handleAbsenceReview(interaction, absenceId, "approved");
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith("absence_reject_")) {
+      const absenceId = interaction.customId.replace("absence_reject_", "");
+      return handleAbsenceReview(interaction, absenceId, "rejected");
     }
 
     // -------------------------------
