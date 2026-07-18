@@ -58,6 +58,10 @@ const CONFIG = {
   lineupChannelId: "1451318638601830550",
   timezone: "Europe/Berlin",
   lineupStartTimeText: "20:30 - 21:00",
+  // Automatische Aufstellungsankündigung erst ab 14:00 Uhr posten.
+  // Falls der Bot um 14:00 Uhr offline ist, wird sie beim nächsten Check nachgeholt.
+  lineupAnnouncementHour: 14,
+  lineupAnnouncementMinute: 0,
   lineupSpecialStartTimes: {
     Mittwoch: "19:30 - 20:00",
     Sonntag: "19:30 - 20:00",
@@ -980,6 +984,15 @@ function parseLineupStartMinutes(startText) {
 function getCurrentBerlinMinutes() {
   const now = getBerlinParts();
   return Number(now.hour) * 60 + Number(now.minute);
+}
+
+function hasLineupAnnouncementTimePassed() {
+  const currentMinutes = getCurrentBerlinMinutes();
+  const announcementHour = Number(CONFIG.lineupAnnouncementHour ?? 14);
+  const announcementMinute = Number(CONFIG.lineupAnnouncementMinute ?? 0);
+  const announcementMinutes = announcementHour * 60 + announcementMinute;
+
+  return currentMinutes >= announcementMinutes;
 }
 
 function hasLineupStartPassed(lineup) {
