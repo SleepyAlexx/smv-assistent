@@ -62,6 +62,7 @@ const CONFIG = {
   // Falls der Bot um 14:00 Uhr offline ist, wird sie beim nächsten Check nachgeholt.
   lineupAnnouncementHour: 14,
   lineupAnnouncementMinute: 0,
+  lineupAnnouncementMinute: 0,
   lineupSpecialStartTimes: {
     Mittwoch: "19:30 - 20:00",
     Sonntag: "19:30 - 20:00",
@@ -1700,6 +1701,16 @@ async function checkDailyLineup() {
   const now = getBerlinParts();
 
   if (!isLineupDay(now.weekday)) return;
+
+  // WICHTIG: Die automatische Aufstellung darf nicht mehr direkt um 00:00 Uhr kommen.
+  // Sie wird erst ab der eingestellten Uhrzeit gepostet.
+  // Wenn der Bot um 14:00 Uhr offline ist, holt er sie beim nächsten Check nach.
+  if (!hasLineupAnnouncementTimePassed()) {
+    const announcementHour = String(CONFIG.lineupAnnouncementHour ?? 14).padStart(2, "0");
+    const announcementMinute = String(CONFIG.lineupAnnouncementMinute ?? 0).padStart(2, "0");
+    console.log(`ℹ️ Aufstellung für ${now.dateText} wird erst ab ${announcementHour}:${announcementMinute} Uhr gepostet.`);
+    return;
+  }
 
   await createLineupForToday("auto-check");
 }
