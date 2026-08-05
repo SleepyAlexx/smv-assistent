@@ -5062,6 +5062,14 @@ async function postDailyReport(reason = "scheduled") {
   saveData(data);
 }
 
+function isDiscordUnknownMessageError(error) {
+  return (
+    error?.code === 10008 ||
+    error?.rawError?.code === 10008 ||
+    String(error?.message || "").includes("Unknown Message")
+  );
+}
+
 async function checkAbsenceDeletions(reason = "scheduled") {
   const now = getBerlinParts();
   const data = loadData();
@@ -5112,22 +5120,45 @@ async function checkAbsenceDeletions(reason = "scheduled") {
       continue;
     }
 
-    const message = absence.messageId
-      ? await channel.messages.fetch(absence.messageId).catch(() => null)
-      : null;
+    let message = null;
+
+    if (absence.messageId) {
+      try {
+        message = await channel.messages.fetch(absence.messageId);
+      } catch (error) {
+        if (isDiscordUnknownMessageError(error)) {
+          message = null;
+        } else {
+          stats.failed += 1;
+          console.error(`❌ Abmeldung ${absence.messageId} konnte nicht geladen werden:`, error.message);
+          await sendErrorLog("Abmeldungs-Löschung fehlgeschlagen", error, [
+            `Abmeldung: ${absence.name || absence.userId || absenceId}`,
+            `Nachricht: ${absence.messageId || "—"}`,
+            `Bis: ${absence.until || "—"}`,
+          ]);
+          continue;
+        }
+      }
+    }
+
+    let messageWasAlreadyGone = !message && Boolean(absence.messageId);
 
     if (message) {
       try {
         await message.delete();
       } catch (error) {
-        stats.failed += 1;
-        console.error(`❌ Abmeldung ${absence.messageId} konnte nicht gelöscht werden:`, error.message);
-        await sendErrorLog("Abmeldungs-Löschung fehlgeschlagen", error, [
-          `Abmeldung: ${absence.name || absence.userId || absenceId}`,
-          `Nachricht: ${absence.messageId || "—"}`,
-          `Bis: ${absence.until || "—"}`,
-        ]);
-        continue;
+        if (isDiscordUnknownMessageError(error)) {
+          messageWasAlreadyGone = true;
+        } else {
+          stats.failed += 1;
+          console.error(`❌ Abmeldung ${absence.messageId} konnte nicht gelöscht werden:`, error.message);
+          await sendErrorLog("Abmeldungs-Löschung fehlgeschlagen", error, [
+            `Abmeldung: ${absence.name || absence.userId || absenceId}`,
+            `Nachricht: ${absence.messageId || "—"}`,
+            `Bis: ${absence.until || "—"}`,
+          ]);
+          continue;
+        }
       }
     }
 
@@ -5144,7 +5175,7 @@ async function checkAbsenceDeletions(reason = "scheduled") {
               `📅 **Von:** ${absence.from || "—"}`,
               `📅 **Bis:** ${absence.until || "—"}`,
               `🗑️ **Gelöscht am:** ${formatGermanDateTimeFromMs(Date.now())}`,
-              message ? null : "ℹ️ **Hinweis:** Die Discord-Nachricht war bereits nicht mehr vorhanden, der Speicher wurde bereinigt.",
+              messageWasAlreadyGone ? "ℹ️ **Hinweis:** Die Discord-Nachricht war bereits nicht mehr vorhanden, der Speicher wurde bereinigt." : null,
               `📝 **Auslöser:** ${reason}`,
               "━━━━━━━━━━━━━━━━━━━━",
             ].filter(Boolean).join("\n")
