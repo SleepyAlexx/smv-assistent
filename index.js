@@ -5519,14 +5519,22 @@ client.on("guildMemberAdd", async (member) => {
 
 client.on("guildMemberRemove", async (member) => {
   try {
-    const message = `Poka, <@${member.id}>!`;
+    // Wenn ein Mitglied den Server verlässt, kann Discord eine Mention wie <@id>
+    // manchmal nur noch als @unbekannter-Benutzer anzeigen.
+    // Deshalb schreiben wir hier den letzten bekannten Servernamen/Nickname als normalen Text.
+    const leftUser = member.user || null;
+    const leftName = getReadableUserName(member, leftUser);
+    const safeLeftName = String(leftName || "Unbekannter User").replace(/[`*_~|]/g, "");
+    const logName = leftUser?.tag || leftUser?.username || member.id || "unbekannt";
+
+    const message = `Poka, **${safeLeftName}**!`;
 
     await sendToChannel(CONFIG.leaveChannelId, {
       content: message,
-      allowedMentions: { users: [member.id] },
+      allowedMentions: { parse: [] },
     });
 
-    console.log(`✅ Leave-Nachricht gesendet für ${member.user.tag}`);
+    console.log(`✅ Leave-Nachricht gesendet für ${logName}`);
   } catch (error) {
     console.error("❌ Fehler bei guildMemberRemove:", error);
   }
