@@ -58,10 +58,9 @@ const CONFIG = {
   lineupChannelId: "1451318638601830550",
   timezone: "Europe/Berlin",
   lineupStartTimeText: "20:30 - 21:00",
-  // Automatische Aufstellungsankündigung erst ab 14:00 Uhr posten.
-  // Falls der Bot um 14:00 Uhr offline ist, wird sie beim nächsten Check nachgeholt.
-  lineupAnnouncementHour: 14,
-  lineupAnnouncementMinute: 0,
+  // Automatische Aufstellungsankündigung erst ab 12:00 Uhr posten.
+  // Falls der Bot um 12:00 Uhr offline ist, wird sie beim nächsten Check nachgeholt.
+  lineupAnnouncementHour: 12,
   lineupAnnouncementMinute: 0,
   lineupSpecialStartTimes: {
     Mittwoch: "19:30 - 20:00",
@@ -120,6 +119,11 @@ const CONFIG = {
     "1451315550394515516",
     "1434318021412786317",
     "1451629804221894868",
+  ],
+
+  // Diese Zusatzrollen dürfen Sanktionen erstellen, ohne komplette Leaderschaftsrechte zu bekommen
+  sanctionCreatorRoleIds: [
+    "1455642939131691141",
   ],
 
   // Nur diese Rollen dürfen über das Familienpanel Fußball-Events erstellen
@@ -728,6 +732,12 @@ function hasLeaderPermission(member) {
   return CONFIG.leaderRoleIds.some((roleId) => member.roles.cache.has(roleId));
 }
 
+function hasSanctionCreatorPermission(member) {
+  if (hasLeaderPermission(member)) return true;
+  if (!member || !member.roles || !member.roles.cache) return false;
+  return (CONFIG.sanctionCreatorRoleIds || []).some((roleId) => member.roles.cache.has(roleId));
+}
+
 function hasFootballCreatorPermission(member) {
   if (!member || !member.roles || !member.roles.cache) return false;
   return CONFIG.footballCreatorRoleIds.some((roleId) => member.roles.cache.has(roleId));
@@ -942,7 +952,6 @@ function isLineupDay(weekday) {
     "Dienstag",
     "Mittwoch",
     "Donnerstag",
-    "Freitag",
     "Samstag",
     "Sonntag",
   ].includes(weekday);
@@ -1704,7 +1713,7 @@ async function checkDailyLineup() {
 
   // WICHTIG: Die automatische Aufstellung darf nicht mehr direkt um 00:00 Uhr kommen.
   // Sie wird erst ab der eingestellten Uhrzeit gepostet.
-  // Wenn der Bot um 14:00 Uhr offline ist, holt er sie beim nächsten Check nach.
+  // Wenn der Bot um 12:00 Uhr offline ist, holt er sie beim nächsten Check nach.
   if (!hasLineupAnnouncementTimePassed()) {
     const announcementHour = String(CONFIG.lineupAnnouncementHour ?? 14).padStart(2, "0");
     const announcementMinute = String(CONFIG.lineupAnnouncementMinute ?? 0).padStart(2, "0");
@@ -6299,12 +6308,25 @@ client.on("interactionCreate", async (interaction) => {
       return handleWeeklyPaymentPauseModal(interaction);
     }
 
-    if (
+    const isSanctionCreateFlow =
+      (interaction.isButton() && ["leader_create_sanction", "sanction_submit", "sanction_clear"].includes(interaction.customId)) ||
+      (interaction.isUserSelectMenu() && interaction.customId === "sanction_user_select") ||
+      (interaction.isStringSelectMenu() && interaction.customId.startsWith("sanction_select_"));
+
+    const isLeaderProtectedFlow =
       (interaction.isButton() && interaction.customId.startsWith("leader_")) ||
       (interaction.isButton() && interaction.customId.startsWith("sanction_")) ||
       (interaction.isUserSelectMenu() && interaction.customId.startsWith("sanction_")) ||
-      (interaction.isStringSelectMenu() && interaction.customId.startsWith("sanction_"))
-    ) {
+      (interaction.isStringSelectMenu() && interaction.customId.startsWith("sanction_"));
+
+    if (isSanctionCreateFlow) {
+      if (!hasSanctionCreatorPermission(interaction.member)) {
+        return interaction.reply({
+          content: "❌ Du hast keine Berechtigung, Sanktionen zu erstellen.",
+          ephemeral: true,
+        });
+      }
+    } else if (isLeaderProtectedFlow) {
       if (!hasLeaderPermission(interaction.member)) {
         return interaction.reply({
           content: "❌ Du hast keine Berechtigung für diese Aktion.",
