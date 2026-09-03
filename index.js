@@ -4173,9 +4173,46 @@ async function checkWeeklyPaymentSummary() {
 // FUẞBALL-EVENTS
 // =====================================================
 
-function createFootballEventModal() {
+function getFootballHeliText(eventOrMode) {
+  const mode = typeof eventOrMode === "string" ? eventOrMode : eventOrMode?.heliMode;
+
+  if (mode === "with_heli") return "Mit Heli";
+  if (mode === "without_heli") return "Ohne Heli";
+
+  return "Nicht angegeben";
+}
+
+function createFootballHeliSelectComponents() {
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("football_heli_select")
+      .setPlaceholder("Heli-Auswahl treffen")
+      .setMinValues(1)
+      .setMaxValues(1)
+      .addOptions(
+        {
+          label: "Mit Heli",
+          description: "Das Fußball-Event wird mit Heli angekündigt.",
+          value: "with_heli",
+          emoji: "🚁",
+        },
+        {
+          label: "Ohne Heli",
+          description: "Das Fußball-Event wird ohne Heli angekündigt.",
+          value: "without_heli",
+          emoji: "🚫",
+        }
+      )
+  );
+
+  return [row];
+}
+
+function createFootballEventModal(heliMode = "unknown") {
+  const safeHeliMode = ["with_heli", "without_heli"].includes(heliMode) ? heliMode : "unknown";
+
   const modal = new ModalBuilder()
-    .setCustomId("football_event_modal")
+    .setCustomId(`football_event_modal_${safeHeliMode}`)
     .setTitle("⚽ SMV Fußball-Event");
 
   const titleInput = new TextInputBuilder()
@@ -4253,7 +4290,7 @@ function createFootballTimeModal(eventId) {
   return modal;
 }
 
-function createFootballEventRecord({ title, dateText, timeText, sizeText, locationText, leaderId }) {
+function createFootballEventRecord({ title, dateText, timeText, sizeText, locationText, heliMode, leaderId }) {
   return {
     id: createShortId(),
     title,
@@ -4261,6 +4298,7 @@ function createFootballEventRecord({ title, dateText, timeText, sizeText, locati
     timeText,
     sizeText,
     locationText,
+    heliMode: ["with_heli", "without_heli"].includes(heliMode) ? heliMode : "unknown",
     leaderId,
     createdAt: Date.now(),
     cancelled: false,
@@ -4345,6 +4383,7 @@ function createFootballEventEmbed(event) {
         "**Deskription:**",
         `⚽ ${event.sizeText}`,
         `📍 Standort: ${event.locationText}`,
+        `🚁 Heli: ${getFootballHeliText(event)}`,
       ].join("\n")
     )
     .addFields(
@@ -4637,7 +4676,7 @@ async function changeFootballTime(interaction, eventId) {
   });
 }
 
-async function createAndPostFootballEvent(interaction) {
+async function createAndPostFootballEvent(interaction, heliMode = "unknown") {
   const title = interaction.fields.getTextInputValue("football_title").trim();
   const dateText = interaction.fields.getTextInputValue("football_date").trim();
   const timeText = interaction.fields.getTextInputValue("football_time").trim();
@@ -4650,6 +4689,7 @@ async function createAndPostFootballEvent(interaction) {
     timeText,
     sizeText,
     locationText,
+    heliMode,
     leaderId: interaction.user.id,
   });
 
@@ -5816,7 +5856,23 @@ client.on("interactionCreate", async (interaction) => {
         });
       }
 
-      return interaction.showModal(createFootballEventModal());
+      return interaction.reply({
+        content: "🚁 Bitte wähle zuerst aus, ob das Fußball-Event **mit Heli** oder **ohne Heli** stattfinden soll.",
+        components: createFootballHeliSelectComponents(),
+        ephemeral: true,
+      });
+    }
+
+    if (interaction.isStringSelectMenu() && interaction.customId === "football_heli_select") {
+      if (!hasFootballCreatorPermission(interaction.member)) {
+        return interaction.reply({
+          content: "❌ Du hast keine Berechtigung, Fußball-Events zu erstellen.",
+          ephemeral: true,
+        });
+      }
+
+      const heliMode = interaction.values?.[0] || "unknown";
+      return interaction.showModal(createFootballEventModal(heliMode));
     }
 
     if (interaction.isStringSelectMenu() && interaction.customId === "weekly_payment_select") {
@@ -5880,7 +5936,7 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.showModal(createRegisterModal());
     }
 
-    if (interaction.isModalSubmit() && interaction.customId === "football_event_modal") {
+    if (interaction.isModalSubmit() && interaction.customId.startsWith("football_event_modal_")) {
       if (!hasFootballCreatorPermission(interaction.member)) {
         return interaction.reply({
           content: "❌ Du hast keine Berechtigung, Fußball-Events zu erstellen.",
@@ -5888,7 +5944,8 @@ client.on("interactionCreate", async (interaction) => {
         });
       }
 
-      return createAndPostFootballEvent(interaction);
+      const heliMode = interaction.customId.replace("football_event_modal_", "");
+      return createAndPostFootballEvent(interaction, heliMode);
     }
 
     if (interaction.isModalSubmit() && interaction.customId.startsWith("football_time_modal_")) {
@@ -6178,7 +6235,8 @@ client.on("interactionCreate", async (interaction) => {
       const statusText = {
         present: "Anwesend",
         absent: "Abwesend",
-      }[selectedStatus];
+        unsure: "Ungewiss",
+      }[selectedStatus] || "Unbekannt";
 
       return interaction.reply({
         content: `✅ Deine Auswahl wurde gespeichert: **${statusText}**`,
