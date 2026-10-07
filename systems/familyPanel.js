@@ -26,26 +26,36 @@ const familyPanelCommand = new SlashCommandBuilder()
 function createFamilyPanelEmbed() {
   return new EmbedBuilder()
     .setColor(CONFIG.embedColor)
-    .setTitle("🐻 • FAMILIENPANEL")
+    .setTitle("🐻 • SMV CONTROL CENTER")
     .setDescription(
       [
         "━━━━━━━━━━━━━━━━━━━━",
-        `Willkommen im Familienbereich der Familie **${CONFIG.familyName}**.`,
+        `**${CONFIG.familyName}**`,
+        "Organisiert. Loyal. Strukturiert.",
         "",
-        "**📋 Abmeldung**",
-        "└ Melde dich für einen bestimmten Zeitraum ab.",
+        "Willkommen im zentralen Familienbereich.",
+        "Wähle unten aus, was du machen möchtest.",
+        "━━━━━━━━━━━━━━━━━━━━",
         "",
-        "**⚽ Fußball-Event**",
-        "└ Spiel gegen eine andere Familie erstellen und Teilnehmer verwalten.",
+        "📋 **FAMILIENVERWALTUNG**",
+        "┃ Abmeldungen sauber einreichen",
+        "┃ Wochenabgabe bestätigen",
+        "┖ Fußball-Events erstellen",
         "",
-        "**💸 Wochenabgabe**",
-        "└ Bestätige deine Wochenabgabe für 1 bis 6 Wochen.",
+        "⚽ **EVENTBEREICH**",
+        "┃ Fußballspiel gegen andere Familien planen",
+        "┃ Teilnehmer über Buttons sammeln",
+        "┖ Heli-Modus direkt beim Erstellen auswählen",
+        "",
+        "💸 **WOCHENABGABE**",
+        "┃ Abgabe für 1 bis 6 Wochen bestätigen",
+        "┖ Zahlende/r-Rolle wird automatisch verwaltet",
         "",
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
     )
     .setFooter({
-      text: `${CONFIG.shortName} • Familienverwaltung • ${getGermanDateTime()}`,
+      text: `${CONFIG.shortName} • Familienpanel • ${getGermanDateTime()}`,
     });
 }
 
