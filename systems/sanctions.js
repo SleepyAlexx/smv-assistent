@@ -175,7 +175,9 @@ async function sendLeaderPanel(client, interaction) {
     });
   }
 
-  const message = await sendToChannel(client, CONFIG.sanctionChannelId, {
+  const leaderPanelChannelId = CONFIG.leaderPanelChannelId || CONFIG.sanctionChannelId;
+
+  const message = await sendToChannel(client, leaderPanelChannelId, {
     embeds: [createLeaderPanelEmbed()],
     components: [createLeaderPanelButtons()],
   });
@@ -188,7 +190,7 @@ async function sendLeaderPanel(client, interaction) {
   }
 
   return safeReply(interaction, {
-    content: `✅ Leaderpanel wurde in <#${CONFIG.sanctionChannelId}> gesendet.`,
+    content: `✅ Leaderpanel wurde in <#${leaderPanelChannelId}> gesendet.`,
     ephemeral: true,
   });
 }
