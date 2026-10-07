@@ -5,6 +5,41 @@ const DATA_DIR = path.join(__dirname, "..", "data");
 const DATA_FILE = path.join(DATA_DIR, "smv-data.json");
 const BACKUP_DIR = path.join(DATA_DIR, "backups");
 
+function getDefaultStorageCategories() {
+  return {
+    allgemein: {
+      id: "allgemein",
+      name: "Allgemein",
+      emoji: "📦",
+      items: {},
+    },
+    langwaffen: {
+      id: "langwaffen",
+      name: "Langwaffen",
+      emoji: "🔫",
+      items: {},
+    },
+    kurzwaffen: {
+      id: "kurzwaffen",
+      name: "Kurzwaffen",
+      emoji: "🔫",
+      items: {},
+    },
+    drugs: {
+      id: "drugs",
+      name: "Drugs",
+      emoji: "💊",
+      items: {},
+    },
+    aufsaetze: {
+      id: "aufsaetze",
+      name: "Aufsätze",
+      emoji: "🧩",
+      items: {},
+    },
+  };
+}
+
 function getDefaultData() {
   return {
     postedDates: {},
@@ -20,40 +55,8 @@ function getDefaultData() {
     backups: {},
     absences: {},
 
-    // Lagersystem
     storage: {
-      categories: {
-        allgemein: {
-          id: "allgemein",
-          name: "Allgemein",
-          emoji: "📦",
-          items: {},
-        },
-        langwaffen: {
-          id: "langwaffen",
-          name: "Langwaffen",
-          emoji: "🔫",
-          items: {},
-        },
-        kurzwaffen: {
-          id: "kurzwaffen",
-          name: "Kurzwaffen",
-          emoji: "🔫",
-          items: {},
-        },
-        drugs: {
-          id: "drugs",
-          name: "Drugs",
-          emoji: "💊",
-          items: {},
-        },
-        aufsaetze: {
-          id: "aufsaetze",
-          name: "Aufsätze",
-          emoji: "🧩",
-          items: {},
-        },
-      },
+      categories: getDefaultStorageCategories(),
       panelMessageId: null,
       logs: [],
     },
@@ -74,23 +77,41 @@ function ensureDataFile() {
   }
 }
 
-function normalizeData(data = {}) {
-  const defaults = getDefaultData();
+function normalizeStorageCategories(data = {}) {
+  const currentCategories = data.storage?.categories;
 
-  const storageCategories = {
-    ...defaults.storage.categories,
-    ...(data.storage?.categories || {}),
-  };
+  let categories;
+
+  // Nur beim allerersten Start Standard-Kategorien erstellen.
+  // Wenn später Kategorien gelöscht wurden, sollen sie NICHT automatisch zurückkommen.
+  if (!currentCategories || Object.keys(currentCategories).length === 0) {
+    categories = getDefaultStorageCategories();
+  } else {
+    categories = currentCategories;
+  }
 
   // Alte fehlerhafte Kategorie aus früherer Version entfernen.
   // "kurzwafen" hatte dieselbe ID wie "kurzwaffen" und verursacht doppelte Dropdown-Werte.
   if (
-    storageCategories.kurzwafen &&
-    storageCategories.kurzwaffen &&
-    storageCategories.kurzwafen.id === storageCategories.kurzwaffen.id
+    categories.kurzwafen &&
+    categories.kurzwaffen &&
+    categories.kurzwafen.id === categories.kurzwaffen.id
   ) {
-    delete storageCategories.kurzwafen;
+    delete categories.kurzwafen;
   }
+
+  // Sicherstellen, dass jede Kategorie ein items-Objekt hat.
+  for (const category of Object.values(categories || {})) {
+    if (!category.items) {
+      category.items = {};
+    }
+  }
+
+  return categories;
+}
+
+function normalizeData(data = {}) {
+  const defaults = getDefaultData();
 
   return {
     ...defaults,
@@ -112,7 +133,7 @@ function normalizeData(data = {}) {
     storage: {
       ...defaults.storage,
       ...(data.storage || {}),
-      categories: storageCategories,
+      categories: normalizeStorageCategories(data),
       logs: data.storage?.logs || [],
       panelMessageId: data.storage?.panelMessageId || null,
     },
