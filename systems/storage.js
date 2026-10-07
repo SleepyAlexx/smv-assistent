@@ -41,38 +41,7 @@ const storagePanelCommand = new SlashCommandBuilder()
 
 function getDefaultStorage() {
   return {
-    categories: {
-      allgemein: {
-        id: "allgemein",
-        name: "Allgemein",
-        emoji: "📦",
-        items: {},
-      },
-      langwaffen: {
-        id: "langwaffen",
-        name: "Langwaffen",
-        emoji: "🔫",
-        items: {},
-      },
-      kurzwaffen: {
-        id: "kurzwaffen",
-        name: "Kurzwaffen",
-        emoji: "🔫",
-        items: {},
-      },
-      drugs: {
-        id: "drugs",
-        name: "Drugs",
-        emoji: "💊",
-        items: {},
-      },
-      aufsaetze: {
-        id: "aufsaetze",
-        name: "Aufsätze",
-        emoji: "🧩",
-        items: {},
-      },
-    },
+    categories: {},
     panelMessageId: null,
     logs: [],
   };
@@ -86,13 +55,7 @@ function ensureStorage(data) {
   }
 
   if (!data.storage.categories) {
-    data.storage.categories = defaults.categories;
-  }
-
-  // Nur wenn wirklich gar keine Kategorie existiert, Standard-Kategorien erstellen.
-  // Dadurch bleiben gelöschte Kategorien auch gelöscht.
-  if (Object.keys(data.storage.categories || {}).length === 0) {
-    data.storage.categories = defaults.categories;
+    data.storage.categories = {};
   }
 
   if (!data.storage.logs) {
@@ -226,7 +189,6 @@ function saveStorageLog(storage, logEntry) {
     createdAt: Date.now(),
   });
 
-  // Nicht unendlich groß werden lassen.
   if (storage.logs.length > 500) {
     storage.logs = storage.logs.slice(storage.logs.length - 500);
   }
@@ -254,6 +216,16 @@ function createStoragePanelEmbed(storage) {
     .setFooter({
       text: `${CONFIG.shortName} • Lagersystem • ${formatGermanDateTimeFromMs(Date.now())}`,
     });
+
+  if (categories.length === 0) {
+    embed.addFields({
+      name: "📦 Lager leer",
+      value: "┖ Noch keine Kategorien vorhanden",
+      inline: false,
+    });
+
+    return embed;
+  }
 
   for (const category of categories) {
     const items = Object.values(category.items || {})
