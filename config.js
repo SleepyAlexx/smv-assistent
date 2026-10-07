@@ -20,7 +20,7 @@ module.exports = {
   timezone: "Europe/Berlin",
   lineupStartTimeText: "20:30 - 21:00",
 
-  // Automatische Aufstellungsankündigung erst ab 12:00 Uhr posten.
+  // Automatische Aufstellungsankündigung ab 12:00 Uhr
   lineupAnnouncementHour: 12,
   lineupAnnouncementMinute: 0,
 
@@ -43,12 +43,12 @@ module.exports = {
   footballEventChannelId: "1451331983459356836",
 
   // Lagersystem
-  storageChannelId: "1451334572833767645",
+  storageChannelId: "1451334572833767645", // Lagerbestand / Lagerpanel
 
   // Lager-Logs
-  storageDepositLogChannelId: "1557424128439484427",
-  storageWithdrawLogChannelId: "1557424160001761340",
-  storageLogChannelId: "1451334572833767645",
+  storageDepositLogChannelId: "1557424128439484427", // Eingelagert
+  storageWithdrawLogChannelId: "1557424160001761340", // Ausgelagert
+  storageLogChannelId: "1557493683446611968", // Lager-Logs / Verwaltung
 
   storageDepositRoleIds: [
     "1451315550394515516",
