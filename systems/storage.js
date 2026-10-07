@@ -217,6 +217,21 @@ function setItemAmount(storage, categoryId, itemName, amount) {
   return item;
 }
 
+function saveStorageLog(storage, logEntry) {
+  if (!storage.logs) storage.logs = [];
+
+  storage.logs.push({
+    id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`,
+    ...logEntry,
+    createdAt: Date.now(),
+  });
+
+  // Nicht unendlich groß werden lassen.
+  if (storage.logs.length > 500) {
+    storage.logs = storage.logs.slice(storage.logs.length - 500);
+  }
+}
+
 // =====================================================
 // EMBEDS / COMPONENTS
 // =====================================================
@@ -309,6 +324,7 @@ function createCategorySelect(storage, customId, placeholder) {
 
 function createStorageActionModal(type, categoryId) {
   const isDeposit = type === "deposit";
+  const isWithdraw = type === "withdraw";
 
   const modal = new ModalBuilder()
     .setCustomId(`storage_${type}_modal_${categoryId}`)
@@ -332,6 +348,15 @@ function createStorageActionModal(type, categoryId) {
     .setMaxLength(8)
     .setRequired(true);
 
+  const recipientInput = new TextInputBuilder()
+    .setCustomId("item_recipient")
+    .setLabel("An wen geht es?")
+    .setPlaceholder("z. B. Alex, Fußball-Team, Eventgruppe")
+    .setStyle(TextInputStyle.Short)
+    .setMinLength(2)
+    .setMaxLength(80)
+    .setRequired(true);
+
   const noteInput = new TextInputBuilder()
     .setCustomId("item_note")
     .setLabel("Notiz / Grund")
@@ -342,9 +367,14 @@ function createStorageActionModal(type, categoryId) {
 
   modal.addComponents(
     new ActionRowBuilder().addComponents(itemInput),
-    new ActionRowBuilder().addComponents(amountInput),
-    new ActionRowBuilder().addComponents(noteInput)
+    new ActionRowBuilder().addComponents(amountInput)
   );
+
+  if (isWithdraw) {
+    modal.addComponents(new ActionRowBuilder().addComponents(recipientInput));
+  }
+
+  modal.addComponents(new ActionRowBuilder().addComponents(noteInput));
 
   return modal;
 }
@@ -474,6 +504,7 @@ async function logStorageAction(client, actionData) {
     amount,
     userId,
     note,
+    recipient,
   } = actionData;
 
   const isDeposit = action === "deposit";
@@ -497,48 +528,59 @@ async function logStorageAction(client, actionData) {
       ? CONFIG.dangerColor
       : CONFIG.warningColor;
 
+  const fields = [
+    {
+      name: "Kategorie",
+      value: `${category?.emoji || "📦"} ${category?.name || "Unbekannt"}`,
+      inline: true,
+    },
+    {
+      name: "Gegenstand",
+      value: itemName || "—",
+      inline: true,
+    },
+    {
+      name: isDeposit ? "Eingelagert" : isWithdraw ? "Ausgelagert" : "Menge",
+      value: `${Number(amount || 0).toLocaleString("de-DE")}x`,
+      inline: true,
+    },
+    {
+      name: "Alter Bestand",
+      value: `${Number(oldAmount || 0).toLocaleString("de-DE")}x`,
+      inline: true,
+    },
+    {
+      name: "Neuer Bestand",
+      value: `${Number(newAmount || 0).toLocaleString("de-DE")}x`,
+      inline: true,
+    },
+    {
+      name: "Von",
+      value: `<@${userId}>`,
+      inline: true,
+    },
+  ];
+
+  if (isWithdraw) {
+    fields.push({
+      name: "Rausgegeben an",
+      value: recipient || "—",
+      inline: false,
+    });
+  }
+
+  fields.push({
+    name: "Notiz",
+    value: note || "—",
+    inline: false,
+  });
+
   await sendToChannel(client, channelId, {
     embeds: [
       new EmbedBuilder()
         .setColor(color)
         .setTitle(title)
-        .addFields(
-          {
-            name: "Kategorie",
-            value: `${category?.emoji || "📦"} ${category?.name || "Unbekannt"}`,
-            inline: true,
-          },
-          {
-            name: "Gegenstand",
-            value: itemName || "—",
-            inline: true,
-          },
-          {
-            name: "Menge",
-            value: `${Number(amount || 0).toLocaleString("de-DE")}x`,
-            inline: true,
-          },
-          {
-            name: "Alter Bestand",
-            value: `${Number(oldAmount || 0).toLocaleString("de-DE")}x`,
-            inline: true,
-          },
-          {
-            name: "Neuer Bestand",
-            value: `${Number(newAmount || 0).toLocaleString("de-DE")}x`,
-            inline: true,
-          },
-          {
-            name: "Von",
-            value: `<@${userId}>`,
-            inline: true,
-          },
-          {
-            name: "Notiz",
-            value: note || "—",
-            inline: false,
-          }
-        )
+        .addFields(fields)
         .setFooter({
           text: `${CONFIG.shortName} • Lagerlog • ${formatGermanDateTimeFromMs(Date.now())}`,
         }),
@@ -972,6 +1014,19 @@ async function processStorageAmountChange(client, interaction, categoryId, actio
   const amountRaw = String(interaction.fields.getTextInputValue("item_amount") || "").trim();
   const note = String(interaction.fields.getTextInputValue("item_note") || "").trim();
 
+  let recipient = null;
+
+  if (action === "withdraw") {
+    recipient = String(interaction.fields.getTextInputValue("item_recipient") || "").trim();
+
+    if (!recipient || recipient.length < 2) {
+      return safeReply(interaction, {
+        content: "❌ Bitte gib ein, an wen die Sachen rausgegeben wurden.",
+        ephemeral: true,
+      });
+    }
+  }
+
   if (!/^\d+$/.test(amountRaw)) {
     return safeReply(interaction, {
       content: "❌ Die Anzahl darf nur aus Zahlen bestehen.",
@@ -1002,6 +1057,20 @@ async function processStorageAmountChange(client, interaction, categoryId, actio
   const item = upsertItem(storage, categoryId, itemName, change);
   const newAmount = Number(item.amount || 0);
 
+  saveStorageLog(storage, {
+    action,
+    categoryId: category.id,
+    categoryName: category.name,
+    itemId: item.id,
+    itemName: item.name,
+    oldAmount,
+    newAmount,
+    amount,
+    userId: interaction.user.id,
+    recipient,
+    note,
+  });
+
   data.storage = storage;
   saveData(data);
 
@@ -1015,13 +1084,14 @@ async function processStorageAmountChange(client, interaction, categoryId, actio
     newAmount,
     amount,
     userId: interaction.user.id,
+    recipient,
     note,
   });
 
   return safeReply(interaction, {
     content: action === "deposit"
       ? `✅ **${amount}x ${item.name}** wurde eingelagert. Neuer Bestand: **${newAmount}x**`
-      : `✅ **${amount}x ${item.name}** wurde ausgelagert. Neuer Bestand: **${newAmount}x**`,
+      : `✅ **${amount}x ${item.name}** wurde an **${recipient}** ausgelagert. Neuer Bestand: **${newAmount}x**`,
     ephemeral: true,
   });
 }
@@ -1069,6 +1139,20 @@ async function processStorageSetItem(client, interaction, categoryId, mode) {
 
   const item = setItemAmount(storage, categoryId, itemName, newAmountWanted);
   const newAmount = Number(item.amount || 0);
+
+  saveStorageLog(storage, {
+    action: "manage",
+    categoryId: category.id,
+    categoryName: category.name,
+    itemId: item.id,
+    itemName: item.name,
+    oldAmount,
+    newAmount,
+    amount: Math.abs(newAmount - oldAmount),
+    userId: interaction.user.id,
+    recipient: null,
+    note: mode === "add_item" ? "Gegenstand hinzugefügt" : "Bestand korrigiert",
+  });
 
   data.storage = storage;
   saveData(data);
@@ -1128,6 +1212,20 @@ async function processStorageDeleteItem(client, interaction, categoryId) {
   const oldName = item.name;
 
   delete category.items[itemId];
+
+  saveStorageLog(storage, {
+    action: "manage",
+    categoryId: category.id,
+    categoryName: category.name,
+    itemId,
+    itemName: oldName,
+    oldAmount,
+    newAmount: 0,
+    amount: oldAmount,
+    userId: interaction.user.id,
+    recipient: null,
+    note: "Gegenstand gelöscht",
+  });
 
   data.storage = storage;
   saveData(data);
