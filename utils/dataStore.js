@@ -35,7 +35,7 @@ function getDefaultData() {
           emoji: "🔫",
           items: {},
         },
-        kurzwafen: {
+        kurzwaffen: {
           id: "kurzwaffen",
           name: "Kurzwaffen",
           emoji: "🔫",
@@ -74,8 +74,23 @@ function ensureDataFile() {
   }
 }
 
-function normalizeData(data) {
+function normalizeData(data = {}) {
   const defaults = getDefaultData();
+
+  const storageCategories = {
+    ...defaults.storage.categories,
+    ...(data.storage?.categories || {}),
+  };
+
+  // Alte fehlerhafte Kategorie aus früherer Version entfernen.
+  // "kurzwafen" hatte dieselbe ID wie "kurzwaffen" und verursacht doppelte Dropdown-Werte.
+  if (
+    storageCategories.kurzwafen &&
+    storageCategories.kurzwaffen &&
+    storageCategories.kurzwafen.id === storageCategories.kurzwaffen.id
+  ) {
+    delete storageCategories.kurzwafen;
+  }
 
   return {
     ...defaults,
@@ -97,10 +112,7 @@ function normalizeData(data) {
     storage: {
       ...defaults.storage,
       ...(data.storage || {}),
-      categories: {
-        ...defaults.storage.categories,
-        ...(data.storage?.categories || {}),
-      },
+      categories: storageCategories,
       logs: data.storage?.logs || [],
       panelMessageId: data.storage?.panelMessageId || null,
     },
