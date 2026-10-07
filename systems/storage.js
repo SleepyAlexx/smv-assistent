@@ -79,12 +79,20 @@ function getDefaultStorage() {
 }
 
 function ensureStorage(data) {
+  const defaults = getDefaultStorage();
+
   if (!data.storage) {
-    data.storage = getDefaultStorage();
+    data.storage = defaults;
   }
 
   if (!data.storage.categories) {
-    data.storage.categories = getDefaultStorage().categories;
+    data.storage.categories = defaults.categories;
+  }
+
+  // Nur wenn wirklich gar keine Kategorie existiert, Standard-Kategorien erstellen.
+  // Dadurch bleiben gelöschte Kategorien auch gelöscht.
+  if (Object.keys(data.storage.categories || {}).length === 0) {
+    data.storage.categories = defaults.categories;
   }
 
   if (!data.storage.logs) {
@@ -95,20 +103,13 @@ function ensureStorage(data) {
     data.storage.panelMessageId = null;
   }
 
-  const defaults = getDefaultStorage();
-
-  for (const [categoryId, category] of Object.entries(defaults.categories)) {
-    if (!data.storage.categories[categoryId]) {
-      data.storage.categories[categoryId] = category;
-    }
-
-    if (!data.storage.categories[categoryId].items) {
-      data.storage.categories[categoryId].items = {};
+  for (const category of Object.values(data.storage.categories || {})) {
+    if (!category.items) {
+      category.items = {};
     }
   }
 
   // Alte fehlerhafte Kategorie aus früherer Version entfernen.
-  // "kurzwafen" hatte dieselbe ID wie "kurzwaffen" und verursacht doppelte Dropdown-Werte.
   if (
     data.storage.categories.kurzwafen &&
     data.storage.categories.kurzwaffen &&
