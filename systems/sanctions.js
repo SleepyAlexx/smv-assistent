@@ -85,29 +85,69 @@ const SANCTION_MAP = new Map(SANCTIONS.map((sanction) => [sanction.id, sanction]
 const sanctionDrafts = new Map();
 
 // =====================================================
+// HELPER
+// =====================================================
+
+function getSanctionStats() {
+  const moneySanctions = SANCTIONS.filter((sanction) => Number(sanction.amount || 0) > 0);
+  const specialSanctions = SANCTIONS.filter((sanction) => sanction.special);
+
+  return {
+    totalRules: SANCTIONS.length,
+    moneyRules: moneySanctions.length,
+    specialRules: specialSanctions.length,
+  };
+}
+
+function getStatusLabel(record) {
+  if (record.cancelled) return "STORNIERT";
+  if (record.paid) return "BEZAHLT";
+  if (Date.now() >= record.dueAt) return "ÜBERFÄLLIG";
+  return "OFFEN";
+}
+
+function getStatusEmoji(record) {
+  if (record.cancelled) return "❌";
+  if (record.paid) return "✅";
+  if (Date.now() >= record.dueAt) return "🚨";
+  return "⏳";
+}
+
+// =====================================================
 // LEADERPANEL
 // =====================================================
 
 function createLeaderPanelEmbed() {
+  const stats = getSanctionStats();
+
   return new EmbedBuilder()
     .setColor(CONFIG.embedColor)
-    .setTitle("👑 • SMV LEADERPANEL")
+    .setTitle("👑 • SMV LEADER CENTER")
     .setDescription(
       [
         "━━━━━━━━━━━━━━━━━━━━",
-        `Leaderbereich der Familie **${CONFIG.familyName}**.`,
+        `Zentraler Verwaltungsbereich der Familie **${CONFIG.familyName}**.`,
         "",
-        "**⚠️ Sanktionen**",
-        "└ User auswählen, eine oder mehrere Sanktionen vergeben und automatisch berechnen lassen.",
+        "Hier verwaltet die Leaderschaft Sanktionen, Wochenabgaben und wichtige Familienentscheidungen.",
         "",
-        "**💸 Wochenabgabe**",
-        "└ Wochenabgabe für 1 bis 6 Wochen aussetzen oder aktive Aussetzungen anzeigen.",
+        "⚠️ **SANKTIONSSYSTEM**",
+        `┃ Regelkatalog: **${stats.totalRules} Einträge**`,
+        `┃ Geldstrafen: **${stats.moneyRules} Einträge**`,
+        `┖ Sonderstrafen: **${stats.specialRules} Einträge**`,
         "",
+        "💸 **WOCHENABGABE**",
+        "┃ Abgaben temporär aussetzen",
+        "┃ aktive Aussetzungen prüfen",
+        "┖ Zahlende/r-System sauber verwalten",
+        "",
+        "🛡️ **LEADER-HINWEIS**",
+        "┃ Nutze Sanktionen nur nachvollziehbar.",
+        "┖ Jede Aktion wird gespeichert und geloggt.",
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
     )
     .setFooter({
-      text: `${CONFIG.shortName} • Leaderverwaltung`,
+      text: `${CONFIG.shortName} • Leader Center`,
     });
 }
 
@@ -209,7 +249,7 @@ function createSanctionBuilderComponents(leaderId) {
   const rowUser = new ActionRowBuilder().addComponents(
     new UserSelectMenuBuilder()
       .setCustomId("sanction_user_select")
-      .setPlaceholder("User auswählen")
+      .setPlaceholder("Betroffene Person auswählen")
       .setMinValues(1)
       .setMaxValues(1)
   );
@@ -221,7 +261,7 @@ function createSanctionBuilderComponents(leaderId) {
   const rowGroup1 = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId("sanction_select_group1")
-      .setPlaceholder("Sanktionen auswählen: §12 - §29")
+      .setPlaceholder("Regelkatalog auswählen: §12 - §29")
       .setMinValues(0)
       .setMaxValues(group1Options.length)
       .addOptions(group1Options)
@@ -230,7 +270,7 @@ function createSanctionBuilderComponents(leaderId) {
   const rowGroup2 = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId("sanction_select_group2")
-      .setPlaceholder("Sanktionen auswählen: §31 - §45")
+      .setPlaceholder("Regelkatalog auswählen: §31 - §45")
       .setMinValues(0)
       .setMaxValues(group2Options.length)
       .addOptions(group2Options)
@@ -239,7 +279,7 @@ function createSanctionBuilderComponents(leaderId) {
   const rowGroup3 = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId("sanction_select_group3")
-      .setPlaceholder("Sanktionen auswählen: §46 - §60")
+      .setPlaceholder("Regelkatalog auswählen: §46 - §60")
       .setMinValues(0)
       .setMaxValues(group3Options.length)
       .addOptions(group3Options)
@@ -250,7 +290,7 @@ function createSanctionBuilderComponents(leaderId) {
   const rowButtons = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("sanction_submit")
-      .setLabel(`Sanktion ausstellen (${selectedCount})`)
+      .setLabel(`Ausstellen (${selectedCount})`)
       .setEmoji("⚠️")
       .setStyle(ButtonStyle.Danger),
 
@@ -269,22 +309,41 @@ function createSanctionDraftText(leaderId) {
   const selectedIds = getDraftSelectedIds(draft);
   const selectedSanctions = selectedIds.map((id) => SANCTION_MAP.get(id)).filter(Boolean);
 
-  const targetText = draft.targetUserId ? `<@${draft.targetUserId}>` : "Noch kein User ausgewählt";
+  const targetText = draft.targetUserId ? `<@${draft.targetUserId}>` : "Noch keine Person ausgewählt";
+
+  const total = selectedSanctions.reduce((sum, sanction) => sum + (Number(sanction.amount) || 0), 0);
 
   const sanctionsText = selectedSanctions.length
-    ? selectedSanctions.map((sanction) => `• **${sanction.section}** ${sanction.label}`).join("\n")
-    : "Noch keine Sanktion ausgewählt";
+    ? selectedSanctions
+        .map((sanction, index) => {
+          const isLast = index === selectedSanctions.length - 1;
+          const punishment = sanction.special && sanction.amount
+            ? `${sanction.special} + ${formatMoney(sanction.amount)}`
+            : sanction.special
+              ? sanction.special
+              : formatMoney(sanction.amount);
+
+          return `${isLast ? "┖" : "┃"} **${sanction.section}** ${sanction.label}\n${isLast ? " " : "┃"} └ ${punishment}`;
+        })
+        .join("\n")
+    : "┖ Noch keine Sanktion ausgewählt";
 
   return [
-    "**⚠️ Sanktion erstellen**",
+    "⚠️ **SMV SANKTIONSERSTELLUNG**",
+    "━━━━━━━━━━━━━━━━━━━━",
     "",
-    `**Name:** ${targetText}`,
+    "👤 **BETROFFENE PERSON**",
+    `┖ ${targetText}`,
     "",
-    "**Ausgewählte Sanktionen:**",
+    "📋 **AUSGEWÄHLTE SANKTIONEN**",
     sanctionsText,
     "",
-    "Wähle zuerst den User und danach eine oder mehrere Sanktionen aus.",
-    "Am Ende auf **Sanktion ausstellen** drücken.",
+    "💰 **BERECHNUNG**",
+    `┃ Anzahl: **${selectedSanctions.length}**`,
+    `┖ Summe: **${total > 0 ? formatMoney(total) : "Keine feste Geldsumme"}**`,
+    "",
+    "━━━━━━━━━━━━━━━━━━━━",
+    "Wähle zuerst die Person und danach eine oder mehrere Sanktionen aus.",
   ].join("\n");
 }
 
@@ -307,7 +366,7 @@ function calculateSanctionTotals(selectedSanctions) {
 
 function formatSanctionList(selectedSanctions) {
   return selectedSanctions
-    .map((sanction) => {
+    .map((sanction, index) => {
       const punishment =
         sanction.special && sanction.amount
           ? `${sanction.special} + ${formatMoney(sanction.amount)}`
@@ -315,9 +374,14 @@ function formatSanctionList(selectedSanctions) {
             ? sanction.special
             : formatMoney(sanction.amount);
 
-      return `**${sanction.section}** ${sanction.label}\n└ ${punishment}`;
+      const isLast = index === selectedSanctions.length - 1;
+
+      return [
+        `${isLast ? "┖" : "┃"} **${sanction.section}** ${sanction.label}`,
+        `${isLast ? " " : "┃"} └ ${punishment}`,
+      ].join("\n");
     })
-    .join("\n\n")
+    .join("\n")
     .slice(0, 3900);
 }
 
@@ -358,15 +422,21 @@ function createSanctionEmbed(record) {
   const moneyText = record.total > 0 ? formatMoney(record.total) : "Keine feste Geldsumme";
 
   const specialText = record.specials && record.specials.length > 0
-    ? record.specials.join("\n")
-    : "Keine";
+    ? record.specials.map((special, index) => {
+        const isLast = index === record.specials.length - 1;
+        return `${isLast ? "┖" : "┃"} ${special}`;
+      }).join("\n")
+    : "┖ Keine";
+
+  const statusLabel = getStatusLabel(record);
+  const statusEmoji = getStatusEmoji(record);
 
   const statusText = record.cancelled
     ? `❌ Storniert von <@${record.cancelledBy}> am <t:${unixTimestamp(record.cancelledAt)}:F>`
     : record.paid
       ? `✅ Bezahlt von <@${record.paidBy}> am <t:${unixTimestamp(record.paidAt)}:F>`
       : Date.now() >= record.dueAt
-        ? "⚠️ Überfällig"
+        ? "🚨 Überfällig"
         : "⏳ Offen";
 
   const embedColor = record.cancelled
@@ -379,46 +449,46 @@ function createSanctionEmbed(record) {
 
   return new EmbedBuilder()
     .setColor(embedColor)
-    .setTitle("🚫 SANKTION 🚫")
+    .setTitle(`${statusEmoji} • SMV SANKTION`)
+    .setDescription(
+      [
+        "━━━━━━━━━━━━━━━━━━━━",
+        `👤 **Betroffene Person:** <@${record.targetUserId}>`,
+        `👑 **Ausgestellt von:** <@${record.leaderId}>`,
+        `📌 **Status:** **${statusLabel}**`,
+        `🆔 **Sanktion-ID:** \`${record.id}\``,
+        "━━━━━━━━━━━━━━━━━━━━",
+      ].join("\n")
+    )
     .addFields(
       {
-        name: "Name",
-        value: `<@${record.targetUserId}>`,
+        name: "📋 REGELVERSTÖSSE",
+        value: formatSanctionList(selectedSanctions) || "┖ Keine Sanktion gefunden",
         inline: false,
       },
       {
-        name: "Sanktion",
-        value: formatSanctionList(selectedSanctions) || "Keine Sanktion gefunden",
-        inline: false,
-      },
-      {
-        name: "Zu Bezahlen",
-        value: moneyText,
+        name: "💰 ZU BEZAHLEN",
+        value: `┖ **${moneyText}**`,
         inline: true,
       },
       {
-        name: "Sonderstrafe",
+        name: "⚖️ SONDERSTRAFE",
         value: specialText,
         inline: true,
       },
       {
-        name: "Zeitraum",
+        name: "⏳ ZEITRAUM",
         value: [
-          `Erstellt: <t:${createdUnix}:F>`,
-          `Frist: <t:${dueUnix}:F>`,
-          `Restzeit: <t:${dueUnix}:R>`,
+          `┃ Erstellt: <t:${createdUnix}:F>`,
+          `┃ Frist: <t:${dueUnix}:F>`,
+          `┖ Restzeit: <t:${dueUnix}:R>`,
         ].join("\n"),
         inline: false,
       },
       {
-        name: "Ausgestellt von",
-        value: `<@${record.leaderId}>`,
-        inline: true,
-      },
-      {
-        name: "Status",
-        value: statusText,
-        inline: true,
+        name: "📌 STATUSDETAIL",
+        value: `┖ ${statusText}`,
+        inline: false,
       }
     )
     .setFooter({
@@ -511,16 +581,16 @@ async function createAndPostSanction(client, interaction, draft) {
     embeds: [
       new EmbedBuilder()
         .setColor(CONFIG.warningColor)
-        .setTitle("🚫 Neue Sanktion erstellt")
+        .setTitle("⚠️ • NEUE SANKTION ERSTELLT")
         .setDescription(
           [
             "━━━━━━━━━━━━━━━━━━━━",
-            `**Name:** <@${record.targetUserId}>`,
-            `**Zu Bezahlen:** ${record.total > 0 ? `**${formatMoney(record.total)}**` : "**Keine feste Geldsumme**"}`,
-            `**Frist:** <t:${unixTimestamp(record.dueAt)}:F>`,
-            `**Restzeit:** <t:${unixTimestamp(record.dueAt)}:R>`,
-            `**Ausgestellt von:** <@${record.leaderId}>`,
-            `**Sanktion-ID:** \`${record.id}\``,
+            `👤 **Name:** <@${record.targetUserId}>`,
+            `💰 **Zu bezahlen:** ${record.total > 0 ? `**${formatMoney(record.total)}**` : "**Keine feste Geldsumme**"}`,
+            `⏳ **Frist:** <t:${unixTimestamp(record.dueAt)}:F>`,
+            `📌 **Restzeit:** <t:${unixTimestamp(record.dueAt)}:R>`,
+            `👑 **Ausgestellt von:** <@${record.leaderId}>`,
+            `🆔 **Sanktion-ID:** \`${record.id}\``,
             "━━━━━━━━━━━━━━━━━━━━",
           ].join("\n")
         )
@@ -576,13 +646,13 @@ async function markSanctionPaid(client, interaction, sanctionId) {
     embeds: [
       new EmbedBuilder()
         .setColor(CONFIG.successColor)
-        .setTitle("✅ Sanktion bezahlt")
+        .setTitle("✅ • SANKTION BEZAHLT")
         .setDescription(
           [
             "━━━━━━━━━━━━━━━━━━━━",
-            `**Name:** <@${record.targetUserId}>`,
-            `**Bezahlt markiert von:** <@${interaction.user.id}>`,
-            `**Sanktion-ID:** \`${record.id}\``,
+            `👤 **Name:** <@${record.targetUserId}>`,
+            `✅ **Bezahlt markiert von:** <@${interaction.user.id}>`,
+            `🆔 **Sanktion-ID:** \`${record.id}\``,
             "━━━━━━━━━━━━━━━━━━━━",
           ].join("\n")
         ),
@@ -633,13 +703,13 @@ async function cancelSanction(client, interaction, sanctionId) {
     embeds: [
       new EmbedBuilder()
         .setColor(CONFIG.dangerColor)
-        .setTitle("❌ Sanktion storniert")
+        .setTitle("❌ • SANKTION STORNIERT")
         .setDescription(
           [
             "━━━━━━━━━━━━━━━━━━━━",
-            `**Name:** <@${record.targetUserId}>`,
-            `**Storniert von:** <@${interaction.user.id}>`,
-            `**Sanktion-ID:** \`${record.id}\``,
+            `👤 **Name:** <@${record.targetUserId}>`,
+            `❌ **Storniert von:** <@${interaction.user.id}>`,
+            `🆔 **Sanktion-ID:** \`${record.id}\``,
             "━━━━━━━━━━━━━━━━━━━━",
           ].join("\n")
         ),
@@ -673,16 +743,16 @@ async function checkOverdueSanctions(client) {
       embeds: [
         new EmbedBuilder()
           .setColor(CONFIG.dangerColor)
-          .setTitle("🚨 Sanktion überfällig")
+          .setTitle("🚨 • SANKTION ÜBERFÄLLIG")
           .setDescription(
             [
               "━━━━━━━━━━━━━━━━━━━━",
-              `**Name:** <@${record.targetUserId}>`,
-              `**Zu Bezahlen:** ${record.total > 0 ? `**${formatMoney(record.total)}**` : "**Keine feste Geldsumme**"}`,
-              `**Frist war:** <t:${unixTimestamp(record.dueAt)}:F>`,
-              `**Überfällig seit:** <t:${unixTimestamp(record.dueAt)}:R>`,
-              `**Ausgestellt von:** <@${record.leaderId}>`,
-              `**Sanktion-ID:** \`${record.id}\``,
+              `👤 **Name:** <@${record.targetUserId}>`,
+              `💰 **Zu bezahlen:** ${record.total > 0 ? `**${formatMoney(record.total)}**` : "**Keine feste Geldsumme**"}`,
+              `⏳ **Frist war:** <t:${unixTimestamp(record.dueAt)}:F>`,
+              `🚨 **Überfällig seit:** <t:${unixTimestamp(record.dueAt)}:R>`,
+              `👑 **Ausgestellt von:** <@${record.leaderId}>`,
+              `🆔 **Sanktion-ID:** \`${record.id}\``,
               "━━━━━━━━━━━━━━━━━━━━",
             ].join("\n")
           )
