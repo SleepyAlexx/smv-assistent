@@ -1,8 +1,10 @@
 const { storagePanelCommand } = require("../systems/storage");
+const { familyPanelCommand } = require("../systems/familyPanel");
 
 function getSlashCommands() {
   return [
     storagePanelCommand,
+    familyPanelCommand,
   ];
 }
 
