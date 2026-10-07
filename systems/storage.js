@@ -107,12 +107,34 @@ function ensureStorage(data) {
     }
   }
 
+  // Alte fehlerhafte Kategorie aus früherer Version entfernen.
+  // "kurzwafen" hatte dieselbe ID wie "kurzwaffen" und verursacht doppelte Dropdown-Werte.
+  if (
+    data.storage.categories.kurzwafen &&
+    data.storage.categories.kurzwaffen &&
+    data.storage.categories.kurzwafen.id === data.storage.categories.kurzwaffen.id
+  ) {
+    delete data.storage.categories.kurzwafen;
+  }
+
   return data.storage;
 }
 
 function getStorageCategories(storage) {
+  const seenIds = new Set();
+
   return Object.values(storage.categories || {})
     .filter(Boolean)
+    .filter((category) => {
+      if (!category.id) return false;
+
+      if (seenIds.has(category.id)) {
+        return false;
+      }
+
+      seenIds.add(category.id);
+      return true;
+    })
     .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "de"));
 }
 
@@ -130,27 +152,6 @@ function getCategoryOptions(storage) {
     value: category.id,
     emoji: category.emoji || "📦",
   }));
-}
-
-function getAllItems(storage) {
-  const result = [];
-
-  for (const category of getStorageCategories(storage)) {
-    for (const item of Object.values(category.items || {})) {
-      result.push({
-        ...item,
-        categoryId: category.id,
-        categoryName: category.name,
-        categoryEmoji: category.emoji || "📦",
-      });
-    }
-  }
-
-  return result.sort((a, b) => {
-    const categoryCompare = String(a.categoryName || "").localeCompare(String(b.categoryName || ""), "de");
-    if (categoryCompare !== 0) return categoryCompare;
-    return String(a.name || "").localeCompare(String(b.name || ""), "de");
-  });
 }
 
 function findItem(storage, categoryId, itemName) {
@@ -307,7 +308,6 @@ function createCategorySelect(storage, customId, placeholder) {
 
 function createStorageActionModal(type, categoryId) {
   const isDeposit = type === "deposit";
-  const isWithdraw = type === "withdraw";
 
   const modal = new ModalBuilder()
     .setCustomId(`storage_${type}_modal_${categoryId}`)
@@ -334,7 +334,7 @@ function createStorageActionModal(type, categoryId) {
   const noteInput = new TextInputBuilder()
     .setCustomId("item_note")
     .setLabel("Notiz / Grund")
-    .setPlaceholder(isWithdraw ? "z. B. Fußball-Event" : "z. B. Route / Einkauf")
+    .setPlaceholder(isDeposit ? "z. B. Route / Einkauf" : "z. B. Fußball-Event")
     .setStyle(TextInputStyle.Short)
     .setMaxLength(80)
     .setRequired(false);
@@ -553,6 +553,7 @@ async function logStorageAction(client, actionData) {
 async function updateStoragePanel(client) {
   const data = loadData();
   const storage = ensureStorage(data);
+  data.storage = storage;
   saveData(data);
 
   const channel = await client.channels.fetch(CONFIG.storageChannelId).catch(() => null);
@@ -634,6 +635,7 @@ async function handleStorageButton(client, interaction) {
 
     const data = loadData();
     const storage = ensureStorage(data);
+    data.storage = storage;
     saveData(data);
 
     await safeReply(interaction, {
@@ -656,6 +658,7 @@ async function handleStorageButton(client, interaction) {
 
     const data = loadData();
     const storage = ensureStorage(data);
+    data.storage = storage;
     saveData(data);
 
     await safeReply(interaction, {
@@ -745,6 +748,7 @@ async function handleStorageSelect(client, interaction) {
     if (selected === "add_item" || selected === "set_item" || selected === "delete_item") {
       const data = loadData();
       const storage = ensureStorage(data);
+      data.storage = storage;
       saveData(data);
 
       await safeReply(interaction, {
@@ -759,6 +763,7 @@ async function handleStorageSelect(client, interaction) {
     if (selected === "delete_category") {
       const data = loadData();
       const storage = ensureStorage(data);
+      data.storage = storage;
       saveData(data);
 
       await safeReply(interaction, {
