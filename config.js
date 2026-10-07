@@ -43,7 +43,7 @@ module.exports = {
   footballEventChannelId: "1451331983459356836",
 
   // Lagersystem
-  storageChannelId: "1451334572833767645", // Lagerbestand / Lagerpanel
+  storageChannelId: "1557521371695939644", // Lagerbestand / Lagerpanel
 
   // Lager-Logs
   storageDepositLogChannelId: "1557424128439484427", // Eingelagert
