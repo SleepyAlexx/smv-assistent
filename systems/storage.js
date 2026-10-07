@@ -72,7 +72,6 @@ function ensureStorage(data) {
     }
   }
 
-  // Alte fehlerhafte Kategorie aus früherer Version entfernen.
   if (
     data.storage.categories.kurzwafen &&
     data.storage.categories.kurzwaffen &&
@@ -114,7 +113,6 @@ function getCategoryOptions(storage) {
     label: String(category.name || category.id).slice(0, 100),
     description: `Kategorie: ${category.id}`.slice(0, 100),
     value: category.id,
-    emoji: category.emoji || "📦",
   }));
 }
 
@@ -288,7 +286,6 @@ function createCategorySelect(storage, customId, placeholder) {
           label: "Keine Kategorie vorhanden",
           value: "none",
           description: "Bitte erst eine Kategorie erstellen.",
-          emoji: "⚠️",
         },
       ])
   );
@@ -362,31 +359,26 @@ function createStorageManageMenu() {
         {
           label: "Kategorie hinzufügen",
           value: "add_category",
-          emoji: "📁",
           description: "Neue Lager-Kategorie erstellen",
         },
         {
           label: "Gegenstand hinzufügen",
           value: "add_item",
-          emoji: "➕",
           description: "Neuen Gegenstand in einer Kategorie anlegen",
         },
         {
           label: "Bestand korrigieren",
           value: "set_item",
-          emoji: "🔧",
           description: "Bestand eines Gegenstands fest setzen",
         },
         {
           label: "Gegenstand löschen",
           value: "delete_item",
-          emoji: "🗑️",
           description: "Einen Gegenstand aus dem Lager entfernen",
         },
         {
           label: "Kategorie löschen",
           value: "delete_category",
-          emoji: "🧹",
           description: "Eine ganze Kategorie löschen",
         }
       )
@@ -401,7 +393,7 @@ function createManageAddCategoryModal() {
   const nameInput = new TextInputBuilder()
     .setCustomId("category_name")
     .setLabel("Name der Kategorie")
-    .setPlaceholder("z. B. Munition")
+    .setPlaceholder("z. B. Westen")
     .setStyle(TextInputStyle.Short)
     .setMinLength(2)
     .setMaxLength(40)
@@ -413,7 +405,7 @@ function createManageAddCategoryModal() {
     .setPlaceholder("z. B. 📦")
     .setStyle(TextInputStyle.Short)
     .setMinLength(1)
-    .setMaxLength(4)
+    .setMaxLength(10)
     .setRequired(false);
 
   modal.addComponents(
