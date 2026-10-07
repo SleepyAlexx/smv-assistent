@@ -116,6 +116,25 @@ function getCategoryOptions(storage) {
   }));
 }
 
+function getStorageStats(storage) {
+  const categories = getStorageCategories(storage);
+  const items = [];
+
+  for (const category of categories) {
+    for (const item of Object.values(category.items || {})) {
+      items.push(item);
+    }
+  }
+
+  const totalAmount = items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+
+  return {
+    categoryCount: categories.length,
+    itemCount: items.length,
+    totalAmount,
+  };
+}
+
 function findItem(storage, categoryId, itemName) {
   const category = getCategory(storage, categoryId);
   if (!category) return null;
@@ -198,27 +217,40 @@ function saveStorageLog(storage, logEntry) {
 
 function createStoragePanelEmbed(storage) {
   const categories = getStorageCategories(storage);
+  const stats = getStorageStats(storage);
 
   const embed = new EmbedBuilder()
     .setColor(CONFIG.embedColor)
-    .setTitle("📦 • SMV LAGERBESTAND")
+    .setTitle("📦 • SMV LAGERZENTRALE")
     .setDescription(
       [
         "━━━━━━━━━━━━━━━━━━━━",
-        "Hier wird der aktuelle Lagerbestand der Familie verwaltet.",
+        "Verwalte hier den kompletten Familienbestand.",
         "",
-        "Nutze die Buttons unten, um Gegenstände einzulagern, auszulagern oder das Lager zu verwalten.",
+        "📊 **STATUS**",
+        `┃ Kategorien: **${stats.categoryCount}**`,
+        `┃ Gegenstände: **${stats.itemCount}**`,
+        `┖ Gesamtmenge: **${stats.totalAmount.toLocaleString("de-DE")}x**`,
+        "",
+        "🛠️ **AKTIONEN**",
+        "┃ Einlagern, Auslagern und Verwaltung laufen über die Buttons.",
+        "┖ Änderungen werden automatisch gespeichert und geloggt.",
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
     )
     .setFooter({
-      text: `${CONFIG.shortName} • Lagersystem • ${formatGermanDateTimeFromMs(Date.now())}`,
+      text: `${CONFIG.shortName} • Lagerzentrale • ${formatGermanDateTimeFromMs(Date.now())}`,
     });
 
   if (categories.length === 0) {
     embed.addFields({
-      name: "📦 Lager leer",
-      value: "┖ Noch keine Kategorien vorhanden",
+      name: "📦 LAGERBESTAND",
+      value: [
+        "┖ Noch keine Kategorien vorhanden",
+        "",
+        "Erstelle die erste Kategorie über:",
+        "`⚙️ Lager verwalten` → `Kategorie hinzufügen`",
+      ].join("\n"),
       inline: false,
     });
 
@@ -239,7 +271,7 @@ function createStoragePanelEmbed(storage) {
       : "┖ Keine Einträge";
 
     embed.addFields({
-      name: `${category.emoji || "📦"} ${category.name || category.id}`,
+      name: `${category.emoji || "📦"} ${String(category.name || category.id).toUpperCase()}`,
       value: value.slice(0, 1024),
       inline: false,
     });
@@ -254,19 +286,19 @@ function createStoragePanelButtons() {
       new ButtonBuilder()
         .setCustomId("storage_deposit")
         .setLabel("Einlagern")
-        .setEmoji("➕")
+        .setEmoji("📥")
         .setStyle(ButtonStyle.Success),
 
       new ButtonBuilder()
         .setCustomId("storage_withdraw")
         .setLabel("Auslagern")
-        .setEmoji("➖")
+        .setEmoji("📤")
         .setStyle(ButtonStyle.Danger),
 
       new ButtonBuilder()
         .setCustomId("storage_manage")
-        .setLabel("Lager verwalten")
-        .setEmoji("⚙️")
+        .setLabel("Verwaltung")
+        .setEmoji("🛠️")
         .setStyle(ButtonStyle.Secondary)
     ),
   ];
@@ -297,7 +329,7 @@ function createStorageActionModal(type, categoryId) {
 
   const modal = new ModalBuilder()
     .setCustomId(`storage_${type}_modal_${categoryId}`)
-    .setTitle(isDeposit ? "➕ Einlagern" : "➖ Auslagern");
+    .setTitle(isDeposit ? "📥 Einlagern" : "📤 Auslagern");
 
   const itemInput = new TextInputBuilder()
     .setCustomId("item_name")
@@ -320,7 +352,7 @@ function createStorageActionModal(type, categoryId) {
   const recipientInput = new TextInputBuilder()
     .setCustomId("item_recipient")
     .setLabel("An wen geht es?")
-    .setPlaceholder("z. B. Alex, Fußball-Team, Eventgruppe")
+    .setPlaceholder("z. B. Max Mustermann, Fußball-Team, Eventgruppe")
     .setStyle(TextInputStyle.Short)
     .setMinLength(2)
     .setMaxLength(80)
@@ -352,7 +384,7 @@ function createStorageManageMenu() {
   return new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId("storage_manage_select")
-      .setPlaceholder("Was möchtest du verwalten?")
+      .setPlaceholder("Lagerverwaltung öffnen")
       .setMinValues(1)
       .setMaxValues(1)
       .addOptions(
@@ -481,10 +513,10 @@ async function logStorageAction(client, actionData) {
       : CONFIG.storageLogChannelId || CONFIG.storageChannelId;
 
   const title = isDeposit
-    ? "➕ Eingelagert"
+    ? "📥 Eingelagert"
     : isWithdraw
-      ? "➖ Ausgelagert"
-      : "⚙️ Lager verwaltet";
+      ? "📤 Ausgelagert"
+      : "🛠️ Lager verwaltet";
 
   const color = isDeposit
     ? CONFIG.successColor
@@ -687,7 +719,7 @@ async function handleStorageButton(client, interaction) {
     }
 
     await safeReply(interaction, {
-      content: "⚙️ Was möchtest du im Lager verwalten?",
+      content: "🛠️ Was möchtest du im Lager verwalten?",
       components: [createStorageManageMenu()],
       ephemeral: true,
     });
