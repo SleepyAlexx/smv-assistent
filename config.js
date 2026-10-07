@@ -31,6 +31,9 @@ module.exports = {
 
   lineupEventStartText: "Mi. & So. um 19:30 Uhr, sonst um 20:30 Uhr",
 
+  // Leaderpanel
+  leaderPanelChannelId: "1508284451858153562",
+
   // Sanktionen
   sanctionChannelId: "1434318024646856758",
   sanctionLogChannelId: "1508286380403589131",
