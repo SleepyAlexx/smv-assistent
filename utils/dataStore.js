@@ -5,41 +5,6 @@ const DATA_DIR = path.join(__dirname, "..", "data");
 const DATA_FILE = path.join(DATA_DIR, "smv-data.json");
 const BACKUP_DIR = path.join(DATA_DIR, "backups");
 
-function getDefaultStorageCategories() {
-  return {
-    allgemein: {
-      id: "allgemein",
-      name: "Allgemein",
-      emoji: "📦",
-      items: {},
-    },
-    langwaffen: {
-      id: "langwaffen",
-      name: "Langwaffen",
-      emoji: "🔫",
-      items: {},
-    },
-    kurzwaffen: {
-      id: "kurzwaffen",
-      name: "Kurzwaffen",
-      emoji: "🔫",
-      items: {},
-    },
-    drugs: {
-      id: "drugs",
-      name: "Drugs",
-      emoji: "💊",
-      items: {},
-    },
-    aufsaetze: {
-      id: "aufsaetze",
-      name: "Aufsätze",
-      emoji: "🧩",
-      items: {},
-    },
-  };
-}
-
 function getDefaultData() {
   return {
     postedDates: {},
@@ -56,7 +21,7 @@ function getDefaultData() {
     absences: {},
 
     storage: {
-      categories: getDefaultStorageCategories(),
+      categories: {},
       panelMessageId: null,
       logs: [],
     },
@@ -78,20 +43,9 @@ function ensureDataFile() {
 }
 
 function normalizeStorageCategories(data = {}) {
-  const currentCategories = data.storage?.categories;
-
-  let categories;
-
-  // Nur beim allerersten Start Standard-Kategorien erstellen.
-  // Wenn später Kategorien gelöscht wurden, sollen sie NICHT automatisch zurückkommen.
-  if (!currentCategories || Object.keys(currentCategories).length === 0) {
-    categories = getDefaultStorageCategories();
-  } else {
-    categories = currentCategories;
-  }
+  const categories = data.storage?.categories || {};
 
   // Alte fehlerhafte Kategorie aus früherer Version entfernen.
-  // "kurzwafen" hatte dieselbe ID wie "kurzwaffen" und verursacht doppelte Dropdown-Werte.
   if (
     categories.kurzwafen &&
     categories.kurzwaffen &&
@@ -100,7 +54,6 @@ function normalizeStorageCategories(data = {}) {
     delete categories.kurzwafen;
   }
 
-  // Sicherstellen, dass jede Kategorie ein items-Objekt hat.
   for (const category of Object.values(categories || {})) {
     if (!category.items) {
       category.items = {};
