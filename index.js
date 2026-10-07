@@ -79,6 +79,27 @@ const CONFIG = {
   // Fußball-Event-Channel
   footballEventChannelId: "1451331983459356836",
 
+  // Lagersystem
+  // Wenn storageChannelId leer bleibt, funktionieren die /lager-Befehle in jedem Channel.
+  // Trage hier später den SMV-Lager-Channel ein, falls es nur in einem festen Channel laufen soll.
+  storageChannelId: "",
+  storageLogChannelId: "",
+  storageDepositRoleIds: [
+    "1451315550394515516",
+    "1434318021412786317",
+    "1451629804221894868",
+  ],
+  storageWithdrawRoleIds: [
+    "1451315550394515516",
+    "1434318021412786317",
+    "1451629804221894868",
+  ],
+  storageManageRoleIds: [
+    "1451315550394515516",
+    "1434318021412786317",
+    "1451629804221894868",
+  ],
+
   // Familienpanel / Abmeldung
   absenceChannelId: "1522813672244908135",
   absenceDeleteLogChannelId: "1527182554640420904",
@@ -322,6 +343,10 @@ function getDefaultData() {
     healthChecks: {},
     backups: {},
     absences: {},
+    storage: {
+      items: {},
+      logs: [],
+    },
   };
 }
 
@@ -359,6 +384,7 @@ function loadData() {
       healthChecks: data.healthChecks || {},
       backups: data.backups || {},
       absences: data.absences || {},
+      storage: data.storage || { items: {}, logs: [] },
     };
   } catch (error) {
     console.error("❌ smv-data.json konnte nicht gelesen werden:", error);
@@ -4720,6 +4746,929 @@ async function createAndPostFootballEvent(interaction, heliMode = "unknown") {
 }
 
 
+// =====================================================
+// LAGERSYSTEM
+// =====================================================
+
+function getDefaultStorageCategories() {
+  return {
+    Allgemein: [
+      "Medkit",
+      "Repkit",
+      "Schwere Westen",
+      "Kleine Westen",
+      "Langwaffenmunition",
+      "Kurzwaffenmunition",
+      "Handys",
+      "GPS",
+      "Profi Dietrich",
+    ],
+    Langwaffen: [
+      "ADV",
+      "Karabiner",
+      "Gusenberg",
+      "AK",
+      "Goldener Revolver",
+      "Sniper",
+    ],
+    Kurzwaffen: [
+      "Luffi",
+      "Schwere Pistole",
+      "Kampfpistole",
+      "Draco",
+      "Machete",
+      "Holzbasi",
+      "Flag Basi",
+      "Alubasi",
+    ],
+    Drugs: [
+      "Joints",
+      "Meth Kisten",
+    ],
+    Aufsätze: [
+      "Schalldämpfer",
+      "Erw. Mag",
+      "Taschenlampe",
+      "Zielfernrohr",
+      "Griff",
+    ],
+  };
+}
+
+function getStorageData(data) {
+  if (!data.storage || typeof data.storage !== "object") {
+    data.storage = { items: {}, logs: [], categories: getDefaultStorageCategories() };
+  }
+
+  if (!data.storage.items || typeof data.storage.items !== "object") {
+    data.storage.items = {};
+  }
+
+  if (!Array.isArray(data.storage.logs)) {
+    data.storage.logs = [];
+  }
+
+  if (!data.storage.categories || typeof data.storage.categories !== "object") {
+    data.storage.categories = getDefaultStorageCategories();
+  }
+
+  const defaults = getDefaultStorageCategories();
+  for (const [categoryName, itemNames] of Object.entries(defaults)) {
+    if (!Array.isArray(data.storage.categories[categoryName])) {
+      data.storage.categories[categoryName] = [];
+    }
+
+    for (const itemName of itemNames) {
+      if (!data.storage.categories[categoryName].includes(itemName)) {
+        data.storage.categories[categoryName].push(itemName);
+      }
+    }
+  }
+
+  // Alte Lagerdaten ohne Kategorie automatisch in Allgemein einsortieren.
+  for (const [key, item] of Object.entries(data.storage.items || {})) {
+    if (!item || typeof item !== "object") continue;
+
+    const itemName = normalizeStorageItemName(item.name || key);
+    const categoryName = normalizeStorageCategoryName(item.category || "Allgemein");
+
+    item.name = itemName;
+    item.category = categoryName;
+
+    if (!Array.isArray(data.storage.categories[categoryName])) {
+      data.storage.categories[categoryName] = [];
+    }
+
+    if (itemName && !data.storage.categories[categoryName].includes(itemName)) {
+      data.storage.categories[categoryName].push(itemName);
+    }
+  }
+
+  return data.storage;
+}
+
+function normalizeStorageText(input, maxLength = 80) {
+  return String(input || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, maxLength);
+}
+
+function normalizeStorageCategoryName(input) {
+  const value = normalizeStorageText(input, 40);
+  if (!value) return "Allgemein";
+  return value;
+}
+
+function normalizeStorageItemName(input) {
+  return normalizeStorageText(input, 80);
+}
+
+function getStorageItemKey(categoryName, itemName) {
+  return `${normalizeStorageCategoryName(categoryName).toLowerCase()}::${normalizeStorageItemName(itemName).toLowerCase()}`;
+}
+
+function formatStorageAmount(amount) {
+  return Number(amount || 0).toLocaleString("de-DE");
+}
+
+function hasConfiguredStorageRole(member, roleIds = []) {
+  if (!member?.roles?.cache) return false;
+  return roleIds.some((roleId) => member.roles.cache.has(roleId));
+}
+
+function hasStorageDepositPermission(member) {
+  return hasLeaderPermission(member) || hasConfiguredStorageRole(member, CONFIG.storageDepositRoleIds);
+}
+
+function hasStorageWithdrawPermission(member) {
+  return hasLeaderPermission(member) || hasConfiguredStorageRole(member, CONFIG.storageWithdrawRoleIds);
+}
+
+function hasStorageManagePermission(member) {
+  return hasLeaderPermission(member) || hasConfiguredStorageRole(member, CONFIG.storageManageRoleIds);
+}
+
+function isStorageChannel(interaction) {
+  return !CONFIG.storageChannelId || interaction.channelId === CONFIG.storageChannelId;
+}
+
+function getStorageChannelWarning() {
+  return CONFIG.storageChannelId
+    ? `❌ Das Lagersystem darf nur in <#${CONFIG.storageChannelId}> genutzt werden.`
+    : null;
+}
+
+function getStorageCategoryNames(storage) {
+  const defaults = Object.keys(getDefaultStorageCategories());
+  const all = [...defaults, ...Object.keys(storage.categories || {})];
+  return all.filter((value, index, array) => array.indexOf(value) === index);
+}
+
+function getStorageItemRecord(storage, categoryName, itemName) {
+  const category = normalizeStorageCategoryName(categoryName);
+  const name = normalizeStorageItemName(itemName);
+  const key = getStorageItemKey(category, name);
+
+  return storage.items[key] || {
+    name,
+    category,
+    amount: 0,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+function addStorageItemToCategory(storage, categoryName, itemName) {
+  const category = normalizeStorageCategoryName(categoryName);
+  const name = normalizeStorageItemName(itemName);
+
+  if (!Array.isArray(storage.categories[category])) {
+    storage.categories[category] = [];
+  }
+
+  if (name && !storage.categories[category].some((storedName) => storedName.toLowerCase() === name.toLowerCase())) {
+    storage.categories[category].push(name);
+  }
+
+  return { category, name };
+}
+
+function removeStorageItemFromCategory(storage, categoryName, itemName) {
+  const category = normalizeStorageCategoryName(categoryName);
+  const name = normalizeStorageItemName(itemName);
+
+  if (!Array.isArray(storage.categories[category])) return;
+
+  storage.categories[category] = storage.categories[category].filter(
+    (storedName) => storedName.toLowerCase() !== name.toLowerCase()
+  );
+}
+
+function createStorageLogEntry({ action, categoryName, itemName, amount, oldAmount, newAmount, userId, userName, reason }) {
+  return {
+    id: createShortId(),
+    action,
+    categoryName: normalizeStorageCategoryName(categoryName),
+    itemName: normalizeStorageItemName(itemName),
+    amount: Number(amount || 0),
+    oldAmount: Number(oldAmount || 0),
+    newAmount: Number(newAmount || 0),
+    userId,
+    userName,
+    reason: reason || null,
+    createdAt: Date.now(),
+  };
+}
+
+function pushStorageLog(storage, entry) {
+  storage.logs.unshift(entry);
+  storage.logs = storage.logs.slice(0, 250);
+}
+
+function getStorageActionTitle(action) {
+  if (action === "deposit") return "📥 • EINLAGERUNG";
+  if (action === "withdraw") return "📤 • AUSLAGERUNG";
+  if (action === "set") return "✏️ • BESTAND KORRIGIERT";
+  if (action === "delete") return "🗑️ • GEGENSTAND GELÖSCHT";
+  if (action === "category_add") return "📁 • KATEGORIE ERSTELLT";
+  if (action === "item_add") return "📦 • GEGENSTAND ERSTELLT";
+  if (action === "category_delete") return "🗑️ • KATEGORIE GELÖSCHT";
+  return "📦 • LAGER GEÄNDERT";
+}
+
+function createStorageActionEmbed(entry) {
+  const isDeposit = entry.action === "deposit";
+  const isWithdraw = entry.action === "withdraw";
+  const isDelete = ["delete", "category_delete"].includes(entry.action);
+  const isSet = entry.action === "set";
+
+  const fields = [];
+
+  if (["deposit", "withdraw", "set", "delete", "item_add"].includes(entry.action)) {
+    fields.push(
+      { name: "📁 Kategorie", value: entry.categoryName || "Allgemein", inline: true },
+      { name: "📦 Gegenstand", value: entry.itemName || "—", inline: true }
+    );
+  }
+
+  if (entry.action === "deposit") {
+    fields.push({ name: "➕ Eingelagert", value: formatStorageAmount(entry.amount), inline: true });
+  }
+
+  if (entry.action === "withdraw") {
+    fields.push({ name: "➖ Ausgelagert", value: formatStorageAmount(entry.amount), inline: true });
+  }
+
+  if (isSet) {
+    fields.push({ name: "✏️ Korrektur", value: formatStorageAmount(entry.newAmount), inline: true });
+  }
+
+  if (["deposit", "withdraw", "set", "delete"].includes(entry.action)) {
+    fields.push(
+      { name: "📊 Alter Bestand", value: formatStorageAmount(entry.oldAmount), inline: true },
+      { name: "📦 Neuer Bestand", value: formatStorageAmount(entry.newAmount), inline: true }
+    );
+  }
+
+  if (entry.action === "category_add" || entry.action === "category_delete") {
+    fields.push({ name: "📁 Kategorie", value: entry.categoryName || "—", inline: false });
+  }
+
+  if (entry.reason) {
+    fields.push({ name: "📝 Grund", value: entry.reason, inline: false });
+  }
+
+  fields.push(
+    { name: "👤 Von", value: entry.userName || `<@${entry.userId}>`, inline: false },
+    { name: "🕘 Zeitpunkt", value: formatGermanDateTimeFromMs(entry.createdAt), inline: false }
+  );
+
+  return new EmbedBuilder()
+    .setColor(isDeposit || entry.action === "item_add" || entry.action === "category_add" ? CONFIG.successColor : isWithdraw || isSet ? CONFIG.warningColor : isDelete ? CONFIG.dangerColor : CONFIG.embedColor)
+    .setTitle(getStorageActionTitle(entry.action))
+    .addFields(fields)
+    .setFooter({ text: `${CONFIG.familyName} • Lager` });
+}
+
+function createStorageOverviewEmbed(storage) {
+  const lines = [];
+  const categoryNames = getStorageCategoryNames(storage);
+
+  for (const categoryName of categoryNames) {
+    const itemNames = Array.isArray(storage.categories?.[categoryName]) ? storage.categories[categoryName] : [];
+
+    if (itemNames.length === 0) continue;
+
+    lines.push(`📦 **${categoryName}**`);
+
+    itemNames
+      .filter(Boolean)
+      .forEach((itemName, index) => {
+        const item = getStorageItemRecord(storage, categoryName, itemName);
+        const isLast = index === itemNames.length - 1;
+        lines.push(`${isLast ? "┖" : "┃"} **${item.name || itemName}:** ${formatStorageAmount(item.amount)}`);
+      });
+
+    lines.push("");
+  }
+
+  if (lines.length === 0) {
+    lines.push("┖ Keine Kategorien oder Gegenstände vorhanden.");
+  }
+
+  return new EmbedBuilder()
+    .setColor(CONFIG.embedColor)
+    .setTitle("📦 • SMV LAGERBESTAND")
+    .setDescription(chunkText(lines.join("\n").trim(), 3900).join("\n"))
+    .setFooter({ text: `${CONFIG.familyName} • Lagerbestand • ${getGermanDateTime()}` });
+}
+
+function createStorageOverviewButtons() {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("storage_deposit_open")
+      .setLabel("Einlagern")
+      .setEmoji("➕")
+      .setStyle(ButtonStyle.Success),
+
+    new ButtonBuilder()
+      .setCustomId("storage_withdraw_open")
+      .setLabel("Auslagern")
+      .setEmoji("➖")
+      .setStyle(ButtonStyle.Danger),
+
+    new ButtonBuilder()
+      .setCustomId("storage_manage_open")
+      .setLabel("Lager verwalten")
+      .setEmoji("⚙️")
+      .setStyle(ButtonStyle.Secondary)
+  );
+}
+
+function createStorageManageEmbed() {
+  return new EmbedBuilder()
+    .setColor(CONFIG.embedColor)
+    .setTitle("⚙️ • LAGER VERWALTEN")
+    .setDescription(
+      [
+        "Hier kannst du das Lager verwalten.",
+        "",
+        "📁 Kategorien erstellen",
+        "📦 Gegenstände erstellen",
+        "✏️ Bestand korrigieren",
+        "🗑️ Gegenstände löschen",
+        "🗑️ Kategorien löschen",
+      ].join("\n")
+    )
+    .setFooter({ text: `${CONFIG.familyName} • Lagerverwaltung` });
+}
+
+function createStorageManageButtons() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("storage_category_add_open")
+        .setLabel("Kategorie hinzufügen")
+        .setEmoji("📁")
+        .setStyle(ButtonStyle.Success),
+
+      new ButtonBuilder()
+        .setCustomId("storage_item_add_open")
+        .setLabel("Gegenstand hinzufügen")
+        .setEmoji("📦")
+        .setStyle(ButtonStyle.Success)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("storage_set_open")
+        .setLabel("Bestand korrigieren")
+        .setEmoji("✏️")
+        .setStyle(ButtonStyle.Primary),
+
+      new ButtonBuilder()
+        .setCustomId("storage_item_delete_open")
+        .setLabel("Gegenstand löschen")
+        .setEmoji("🗑️")
+        .setStyle(ButtonStyle.Danger),
+
+      new ButtonBuilder()
+        .setCustomId("storage_category_delete_open")
+        .setLabel("Kategorie löschen")
+        .setEmoji("🗑️")
+        .setStyle(ButtonStyle.Danger)
+    ),
+  ];
+}
+
+function createStorageActionModal(action) {
+  const isDeposit = action === "deposit";
+  const modal = new ModalBuilder()
+    .setCustomId(`storage_action_modal_${action}`)
+    .setTitle(isDeposit ? "📥 Einlagern" : "📤 Auslagern");
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId("category")
+        .setLabel("Kategorie")
+        .setPlaceholder("z. B. Allgemein")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(40)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId("item")
+        .setLabel("Gegenstand")
+        .setPlaceholder("z. B. GPS")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(80)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId("amount")
+        .setLabel(isDeposit ? "Anzahl einlagern" : "Anzahl auslagern")
+        .setPlaceholder("Nur Zahlen")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(12)
+    )
+  );
+
+  return modal;
+}
+
+function createStorageCategoryModal(action) {
+  const isDelete = action === "category_delete";
+  const modal = new ModalBuilder()
+    .setCustomId(`storage_manage_modal_${action}`)
+    .setTitle(isDelete ? "🗑️ Kategorie löschen" : "📁 Kategorie hinzufügen");
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId("category")
+        .setLabel("Kategorie")
+        .setPlaceholder("z. B. Allgemein")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(40)
+    )
+  );
+
+  return modal;
+}
+
+function createStorageItemManageModal(action) {
+  const titles = {
+    item_add: "📦 Gegenstand hinzufügen",
+    set: "✏️ Bestand korrigieren",
+    item_delete: "🗑️ Gegenstand löschen",
+  };
+
+  const modal = new ModalBuilder()
+    .setCustomId(`storage_manage_modal_${action}`)
+    .setTitle(titles[action] || "⚙️ Lager verwalten");
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId("category")
+        .setLabel("Kategorie")
+        .setPlaceholder("z. B. Allgemein")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(40)
+    ),
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId("item")
+        .setLabel("Gegenstand")
+        .setPlaceholder("z. B. GPS")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(80)
+    )
+  );
+
+  if (action === "set") {
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("amount")
+          .setLabel("Neuer Bestand")
+          .setPlaceholder("Nur Zahlen")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(12)
+      )
+    );
+  }
+
+  return modal;
+}
+
+function parseStorageAmountInput(input) {
+  const value = String(input || "").trim();
+  if (!/^\d+$/.test(value)) return null;
+  return Number(value);
+}
+
+async function sendStorageLog(entry) {
+  const targetChannelId = CONFIG.storageLogChannelId || CONFIG.storageChannelId;
+  if (!targetChannelId) return;
+
+  await sendToChannel(targetChannelId, {
+    embeds: [createStorageActionEmbed(entry)],
+    allowedMentions: { parse: [] },
+  });
+}
+
+async function updateStoragePanelMessage(data = null) {
+  const workingData = data || loadData();
+  const storage = getStorageData(workingData);
+
+  if (!storage.panelChannelId || !storage.panelMessageId) return;
+
+  const channel = await client.channels.fetch(storage.panelChannelId).catch(() => null);
+  if (!channel?.messages) return;
+
+  const message = await channel.messages.fetch(storage.panelMessageId).catch(() => null);
+  if (!message) return;
+
+  await message.edit({
+    embeds: [createStorageOverviewEmbed(storage)],
+    components: [createStorageOverviewButtons()],
+  }).catch((error) => {
+    console.error("❌ Lagerbestand-Nachricht konnte nicht aktualisiert werden:", error);
+  });
+}
+
+async function postStoragePanel(interaction) {
+  if (!hasStorageManagePermission(interaction.member)) {
+    return interaction.reply({
+      content: "❌ Du hast keine Berechtigung, das Lagerpanel zu senden.",
+      ephemeral: true,
+    });
+  }
+
+  if (!isStorageChannel(interaction)) {
+    return interaction.reply({
+      content: getStorageChannelWarning(),
+      ephemeral: true,
+    });
+  }
+
+  const data = loadData();
+  const storage = getStorageData(data);
+  const targetChannel = CONFIG.storageChannelId
+    ? await client.channels.fetch(CONFIG.storageChannelId).catch(() => null)
+    : interaction.channel;
+
+  if (!targetChannel) {
+    return interaction.reply({
+      content: "❌ Lager-Channel wurde nicht gefunden.",
+      ephemeral: true,
+    });
+  }
+
+  const message = await targetChannel.send({
+    embeds: [createStorageOverviewEmbed(storage)],
+    components: [createStorageOverviewButtons()],
+  });
+
+  storage.panelChannelId = message.channel.id;
+  storage.panelMessageId = message.id;
+  saveData(data);
+
+  return interaction.reply({
+    content: `✅ Lagerpanel wurde in <#${message.channel.id}> gesendet.`,
+    ephemeral: true,
+  });
+}
+
+async function handleStorageCommand(interaction) {
+  if (!isStorageChannel(interaction)) {
+    return interaction.reply({
+      content: getStorageChannelWarning(),
+      ephemeral: true,
+    });
+  }
+
+  const subcommand = interaction.options.getSubcommand();
+
+  if (subcommand === "bestand") {
+    const data = loadData();
+    const storage = getStorageData(data);
+
+    return interaction.reply({
+      embeds: [createStorageOverviewEmbed(storage)],
+      components: [createStorageOverviewButtons()],
+      ephemeral: true,
+    });
+  }
+
+  if (subcommand === "einlagern" && !hasStorageDepositPermission(interaction.member)) {
+    return interaction.reply({ content: "❌ Du hast keine Berechtigung, Gegenstände einzulagern.", ephemeral: true });
+  }
+
+  if (subcommand === "auslagern" && !hasStorageWithdrawPermission(interaction.member)) {
+    return interaction.reply({ content: "❌ Du hast keine Berechtigung, Gegenstände auszulagern.", ephemeral: true });
+  }
+
+  if (["setzen", "loeschen"].includes(subcommand) && !hasStorageManagePermission(interaction.member)) {
+    return interaction.reply({ content: "❌ Du hast keine Berechtigung, Lagerbestände zu korrigieren.", ephemeral: true });
+  }
+
+  const categoryName = normalizeStorageCategoryName(interaction.options.getString("kategorie") || "Allgemein");
+  const itemName = normalizeStorageItemName(interaction.options.getString("gegenstand"));
+
+  if (!itemName) {
+    return interaction.reply({ content: "❌ Bitte gib einen gültigen Gegenstand an.", ephemeral: true });
+  }
+
+  const data = loadData();
+  const storage = getStorageData(data);
+  addStorageItemToCategory(storage, categoryName, itemName);
+
+  const itemKey = getStorageItemKey(categoryName, itemName);
+  const existing = getStorageItemRecord(storage, categoryName, itemName);
+  const oldAmount = Number(existing.amount || 0);
+  let newAmount = oldAmount;
+  let amount = 0;
+  let action = subcommand;
+  let reason = interaction.options.getString("grund")?.trim() || null;
+
+  if (subcommand === "einlagern") {
+    amount = interaction.options.getInteger("anzahl");
+    newAmount = oldAmount + amount;
+    action = "deposit";
+  }
+
+  if (subcommand === "auslagern") {
+    amount = interaction.options.getInteger("anzahl");
+    if (oldAmount < amount) {
+      return interaction.reply({
+        content: `❌ Davon sind nur **${formatStorageAmount(oldAmount)}** im Lager. Auslagern unter 0 ist nicht möglich.`,
+        ephemeral: true,
+      });
+    }
+    newAmount = oldAmount - amount;
+    action = "withdraw";
+  }
+
+  if (subcommand === "setzen") {
+    amount = interaction.options.getInteger("anzahl");
+    newAmount = amount;
+    action = "set";
+  }
+
+  if (subcommand === "loeschen") {
+    action = "delete";
+    amount = oldAmount;
+    newAmount = 0;
+  }
+
+  const entry = createStorageLogEntry({
+    action,
+    categoryName,
+    itemName,
+    amount,
+    oldAmount,
+    newAmount,
+    userId: interaction.user.id,
+    userName: getReadableUserName(interaction.member, interaction.user),
+    reason,
+  });
+
+  if (subcommand === "loeschen") {
+    delete storage.items[itemKey];
+    removeStorageItemFromCategory(storage, categoryName, itemName);
+  } else {
+    storage.items[itemKey] = {
+      ...existing,
+      name: itemName,
+      category: categoryName,
+      amount: newAmount,
+      updatedAt: Date.now(),
+      updatedBy: interaction.user.id,
+    };
+  }
+
+  pushStorageLog(storage, entry);
+  saveData(data);
+  await sendStorageLog(entry).catch((error) => console.error("❌ Fehler beim Lager-Log:", error));
+  await updateStoragePanelMessage(data);
+
+  return interaction.reply({ embeds: [createStorageActionEmbed(entry)], ephemeral: true });
+}
+
+async function handleStoragePanelButton(interaction) {
+  if (!isStorageChannel(interaction)) {
+    return interaction.reply({ content: getStorageChannelWarning(), ephemeral: true });
+  }
+
+  if (interaction.customId === "storage_deposit_open") {
+    if (!hasStorageDepositPermission(interaction.member)) {
+      return interaction.reply({ content: "❌ Du hast keine Berechtigung, Gegenstände einzulagern.", ephemeral: true });
+    }
+    return interaction.showModal(createStorageActionModal("deposit"));
+  }
+
+  if (interaction.customId === "storage_withdraw_open") {
+    if (!hasStorageWithdrawPermission(interaction.member)) {
+      return interaction.reply({ content: "❌ Du hast keine Berechtigung, Gegenstände auszulagern.", ephemeral: true });
+    }
+    return interaction.showModal(createStorageActionModal("withdraw"));
+  }
+
+  if (interaction.customId === "storage_manage_open") {
+    if (!hasStorageManagePermission(interaction.member)) {
+      return interaction.reply({ content: "❌ Du hast keine Berechtigung, das Lager zu verwalten.", ephemeral: true });
+    }
+    return interaction.reply({ embeds: [createStorageManageEmbed()], components: createStorageManageButtons(), ephemeral: true });
+  }
+
+  if (!hasStorageManagePermission(interaction.member)) {
+    return interaction.reply({ content: "❌ Du hast keine Berechtigung, das Lager zu verwalten.", ephemeral: true });
+  }
+
+  if (interaction.customId === "storage_category_add_open") {
+    return interaction.showModal(createStorageCategoryModal("category_add"));
+  }
+
+  if (interaction.customId === "storage_item_add_open") {
+    return interaction.showModal(createStorageItemManageModal("item_add"));
+  }
+
+  if (interaction.customId === "storage_set_open") {
+    return interaction.showModal(createStorageItemManageModal("set"));
+  }
+
+  if (interaction.customId === "storage_item_delete_open") {
+    return interaction.showModal(createStorageItemManageModal("item_delete"));
+  }
+
+  if (interaction.customId === "storage_category_delete_open") {
+    return interaction.showModal(createStorageCategoryModal("category_delete"));
+  }
+}
+
+async function handleStorageActionModal(interaction) {
+  if (!isStorageChannel(interaction)) {
+    return interaction.reply({ content: getStorageChannelWarning(), ephemeral: true });
+  }
+
+  const action = interaction.customId.replace("storage_action_modal_", "");
+
+  if (action === "deposit" && !hasStorageDepositPermission(interaction.member)) {
+    return interaction.reply({ content: "❌ Du hast keine Berechtigung, Gegenstände einzulagern.", ephemeral: true });
+  }
+
+  if (action === "withdraw" && !hasStorageWithdrawPermission(interaction.member)) {
+    return interaction.reply({ content: "❌ Du hast keine Berechtigung, Gegenstände auszulagern.", ephemeral: true });
+  }
+
+  const categoryName = normalizeStorageCategoryName(interaction.fields.getTextInputValue("category"));
+  const itemName = normalizeStorageItemName(interaction.fields.getTextInputValue("item"));
+  const amount = parseStorageAmountInput(interaction.fields.getTextInputValue("amount"));
+
+  if (!categoryName || !itemName || amount === null || amount <= 0) {
+    return interaction.reply({ content: "❌ Bitte fülle Kategorie, Gegenstand und Anzahl sauber aus. Bei Anzahl sind nur Zahlen erlaubt.", ephemeral: true });
+  }
+
+  const data = loadData();
+  const storage = getStorageData(data);
+  addStorageItemToCategory(storage, categoryName, itemName);
+
+  const itemKey = getStorageItemKey(categoryName, itemName);
+  const existing = getStorageItemRecord(storage, categoryName, itemName);
+  const oldAmount = Number(existing.amount || 0);
+  let newAmount = oldAmount;
+
+  if (action === "deposit") {
+    newAmount = oldAmount + amount;
+  }
+
+  if (action === "withdraw") {
+    if (oldAmount < amount) {
+      return interaction.reply({
+        content: `❌ Davon sind nur **${formatStorageAmount(oldAmount)}** im Lager. Auslagern unter 0 ist nicht möglich.`,
+        ephemeral: true,
+      });
+    }
+    newAmount = oldAmount - amount;
+  }
+
+  const entry = createStorageLogEntry({
+    action,
+    categoryName,
+    itemName,
+    amount,
+    oldAmount,
+    newAmount,
+    userId: interaction.user.id,
+    userName: getReadableUserName(interaction.member, interaction.user),
+  });
+
+  storage.items[itemKey] = {
+    ...existing,
+    name: itemName,
+    category: categoryName,
+    amount: newAmount,
+    updatedAt: Date.now(),
+    updatedBy: interaction.user.id,
+  };
+
+  pushStorageLog(storage, entry);
+  saveData(data);
+  await sendStorageLog(entry).catch((error) => console.error("❌ Fehler beim Lager-Log:", error));
+  await updateStoragePanelMessage(data);
+
+  return interaction.reply({ embeds: [createStorageActionEmbed(entry)], ephemeral: true });
+}
+
+async function handleStorageManageModal(interaction) {
+  if (!isStorageChannel(interaction)) {
+    return interaction.reply({ content: getStorageChannelWarning(), ephemeral: true });
+  }
+
+  if (!hasStorageManagePermission(interaction.member)) {
+    return interaction.reply({ content: "❌ Du hast keine Berechtigung, das Lager zu verwalten.", ephemeral: true });
+  }
+
+  const action = interaction.customId.replace("storage_manage_modal_", "");
+  const data = loadData();
+  const storage = getStorageData(data);
+  const categoryName = normalizeStorageCategoryName(interaction.fields.getTextInputValue("category"));
+
+  let itemName = null;
+  let amount = 0;
+  let oldAmount = 0;
+  let newAmount = 0;
+  let itemKey = null;
+
+  if (["item_add", "set", "item_delete"].includes(action)) {
+    itemName = normalizeStorageItemName(interaction.fields.getTextInputValue("item"));
+    if (!itemName) {
+      return interaction.reply({ content: "❌ Bitte gib einen gültigen Gegenstand an.", ephemeral: true });
+    }
+
+    itemKey = getStorageItemKey(categoryName, itemName);
+    const existing = getStorageItemRecord(storage, categoryName, itemName);
+    oldAmount = Number(existing.amount || 0);
+  }
+
+  if (action === "category_add") {
+    if (!Array.isArray(storage.categories[categoryName])) storage.categories[categoryName] = [];
+  }
+
+  if (action === "category_delete") {
+    delete storage.categories[categoryName];
+    for (const [key, item] of Object.entries(storage.items || {})) {
+      if (String(item.category || "").toLowerCase() === categoryName.toLowerCase()) {
+        delete storage.items[key];
+      }
+    }
+  }
+
+  if (action === "item_add") {
+    addStorageItemToCategory(storage, categoryName, itemName);
+    storage.items[itemKey] = {
+      name: itemName,
+      category: categoryName,
+      amount: oldAmount,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      updatedBy: interaction.user.id,
+    };
+    newAmount = oldAmount;
+  }
+
+  if (action === "set") {
+    amount = parseStorageAmountInput(interaction.fields.getTextInputValue("amount"));
+    if (amount === null) {
+      return interaction.reply({ content: "❌ Beim Bestand sind nur Zahlen erlaubt.", ephemeral: true });
+    }
+
+    addStorageItemToCategory(storage, categoryName, itemName);
+    newAmount = amount;
+    storage.items[itemKey] = {
+      name: itemName,
+      category: categoryName,
+      amount: newAmount,
+      updatedAt: Date.now(),
+      updatedBy: interaction.user.id,
+    };
+  }
+
+  if (action === "item_delete") {
+    delete storage.items[itemKey];
+    removeStorageItemFromCategory(storage, categoryName, itemName);
+    newAmount = 0;
+  }
+
+  const entry = createStorageLogEntry({
+    action: action === "item_delete" ? "delete" : action,
+    categoryName,
+    itemName: itemName || categoryName,
+    amount,
+    oldAmount,
+    newAmount,
+    userId: interaction.user.id,
+    userName: getReadableUserName(interaction.member, interaction.user),
+  });
+
+  pushStorageLog(storage, entry);
+  saveData(data);
+  await sendStorageLog(entry).catch((error) => console.error("❌ Fehler beim Lager-Log:", error));
+  await updateStoragePanelMessage(data);
+
+  return interaction.reply({ embeds: [createStorageActionEmbed(entry)], ephemeral: true });
+}
+
 function getActiveAbsenceEntries() {
   const data = loadData();
   const now = getBerlinParts();
@@ -4928,6 +5877,13 @@ async function showHelp(interaction) {
         "`/abmeldungen` — aktive Abmeldungen anzeigen",
         "`/abmeldungen-scan` — alte Bot-Abmeldungen nachträglich speichern",
         "`/abmeldungen-loeschcheck` — alte Bot-Abmeldungen scannen und fällige sofort löschen",
+        "",
+        "**📦 Lager**",
+        "`/lager bestand` — aktuellen Lagerbestand anzeigen",
+        "`/lager einlagern` — Gegenstände einlagern",
+        "`/lager auslagern` — Gegenstände auslagern",
+        "`/lager setzen` — Bestand korrigieren",
+        "`/lager loeschen` — Fehleintrag löschen",
         "",
         "**🛠️ Verwaltung**",
         "`/leaderpanel` — Leaderpanel senden",
@@ -5469,6 +6425,12 @@ async function registerCommands() {
       .toJSON(),
 
     new SlashCommandBuilder()
+      .setName("lagerpanel")
+      .setDescription("Sendet das SMV Lagerpanel mit Buttons")
+      .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+      .toJSON(),
+
+    new SlashCommandBuilder()
       .setName("aufstellung-morgen")
       .setDescription("Postet die Aufstellung für morgen")
       .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
@@ -5491,6 +6453,131 @@ async function registerCommands() {
           .setRequired(true)
           .setMinValue(1)
           .setMaxValue(6)
+      )
+      .toJSON(),
+
+
+
+    new SlashCommandBuilder()
+      .setName("lager")
+      .setDescription("SMV Lagersystem verwalten")
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName("bestand")
+          .setDescription("Zeigt den aktuellen Lagerbestand")
+      )
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName("einlagern")
+          .setDescription("Lagert einen Gegenstand ein")
+          .addStringOption((option) =>
+            option
+              .setName("gegenstand")
+              .setDescription("Welcher Gegenstand soll eingelagert werden?")
+              .setRequired(true)
+          )
+          .addStringOption((option) =>
+            option
+              .setName("kategorie")
+              .setDescription("Kategorie, z. B. Allgemein")
+              .setRequired(false)
+          )
+          .addIntegerOption((option) =>
+            option
+              .setName("anzahl")
+              .setDescription("Wie viele sollen eingelagert werden?")
+              .setRequired(true)
+              .setMinValue(1)
+          )
+          .addStringOption((option) =>
+            option
+              .setName("grund")
+              .setDescription("Optionaler Grund / Hinweis")
+              .setRequired(false)
+          )
+      )
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName("auslagern")
+          .setDescription("Lagert einen Gegenstand aus")
+          .addStringOption((option) =>
+            option
+              .setName("gegenstand")
+              .setDescription("Welcher Gegenstand soll ausgelagert werden?")
+              .setRequired(true)
+          )
+          .addStringOption((option) =>
+            option
+              .setName("kategorie")
+              .setDescription("Kategorie, z. B. Allgemein")
+              .setRequired(false)
+          )
+          .addIntegerOption((option) =>
+            option
+              .setName("anzahl")
+              .setDescription("Wie viele sollen ausgelagert werden?")
+              .setRequired(true)
+              .setMinValue(1)
+          )
+          .addStringOption((option) =>
+            option
+              .setName("grund")
+              .setDescription("Optionaler Grund / Hinweis")
+              .setRequired(false)
+          )
+      )
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName("setzen")
+          .setDescription("Setzt den Bestand eines Gegenstands auf eine feste Anzahl")
+          .addStringOption((option) =>
+            option
+              .setName("gegenstand")
+              .setDescription("Welcher Gegenstand soll korrigiert werden?")
+              .setRequired(true)
+          )
+          .addStringOption((option) =>
+            option
+              .setName("kategorie")
+              .setDescription("Kategorie, z. B. Allgemein")
+              .setRequired(false)
+          )
+          .addIntegerOption((option) =>
+            option
+              .setName("anzahl")
+              .setDescription("Auf welchen Bestand soll gesetzt werden?")
+              .setRequired(true)
+              .setMinValue(0)
+          )
+          .addStringOption((option) =>
+            option
+              .setName("grund")
+              .setDescription("Grund für die Korrektur")
+              .setRequired(false)
+          )
+      )
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName("loeschen")
+          .setDescription("Löscht einen Fehleintrag vollständig aus dem Lager")
+          .addStringOption((option) =>
+            option
+              .setName("gegenstand")
+              .setDescription("Welcher Fehleintrag soll gelöscht werden?")
+              .setRequired(true)
+          )
+          .addStringOption((option) =>
+            option
+              .setName("kategorie")
+              .setDescription("Kategorie, z. B. Allgemein")
+              .setRequired(false)
+          )
+          .addStringOption((option) =>
+            option
+              .setName("grund")
+              .setDescription("Grund für die Löschung")
+              .setRequired(false)
+          )
       )
       .toJSON(),
 
@@ -5640,6 +6727,14 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.isChatInputCommand() && interaction.commandName === "hilfe") {
       return showHelp(interaction);
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === "lager") {
+      return handleStorageCommand(interaction);
+    }
+
+    if (interaction.isChatInputCommand() && interaction.commandName === "lagerpanel") {
+      return postStoragePanel(interaction);
     }
 
     if (interaction.isChatInputCommand() && interaction.commandName === "registrierpanel") {
@@ -5834,6 +6929,22 @@ client.on("interactionCreate", async (interaction) => {
 
     if (interaction.isChatInputCommand() && interaction.commandName === "wochenabgabe-eintragen") {
       return manuallyAddWeeklyPayment(interaction);
+    }
+
+    // -------------------------------
+    // Lagersystem
+    // -------------------------------
+
+    if (interaction.isButton() && interaction.customId.startsWith("storage_")) {
+      return handleStoragePanelButton(interaction);
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId.startsWith("storage_action_modal_")) {
+      return handleStorageActionModal(interaction);
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId.startsWith("storage_manage_modal_")) {
+      return handleStorageManageModal(interaction);
     }
 
     // -------------------------------
