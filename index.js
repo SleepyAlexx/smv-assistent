@@ -80,10 +80,13 @@ const CONFIG = {
   footballEventChannelId: "1451331983459356836",
 
   // Lagersystem
-  // Wenn storageChannelId leer bleibt, funktionieren die /lager-Befehle in jedem Channel.
-  // Trage hier später den SMV-Lager-Channel ein, falls es nur in einem festen Channel laufen soll.
-  storageChannelId: "",
-  storageLogChannelId: "",
+  // Lagerbestand / Lagerpanel
+  storageChannelId: "1451334572833767645",
+
+  // Lager-Logs
+  storageDepositLogChannelId: "1557424128439484427",
+  storageWithdrawLogChannelId: "1557424160001761340",
+  storageLogChannelId: "1451334572833767645",
   storageDepositRoleIds: [
     "1451315550394515516",
     "1434318021412786317",
@@ -5256,8 +5259,20 @@ function parseStorageAmountInput(input) {
   return Number(value);
 }
 
+function getStorageLogChannelId(action) {
+  if (action === "deposit") {
+    return CONFIG.storageDepositLogChannelId || CONFIG.storageLogChannelId || CONFIG.storageChannelId;
+  }
+
+  if (action === "withdraw") {
+    return CONFIG.storageWithdrawLogChannelId || CONFIG.storageLogChannelId || CONFIG.storageChannelId;
+  }
+
+  return CONFIG.storageLogChannelId || CONFIG.storageChannelId;
+}
+
 async function sendStorageLog(entry) {
-  const targetChannelId = CONFIG.storageLogChannelId || CONFIG.storageChannelId;
+  const targetChannelId = getStorageLogChannelId(entry?.action);
   if (!targetChannelId) return;
 
   await sendToChannel(targetChannelId, {
