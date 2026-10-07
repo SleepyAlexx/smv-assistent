@@ -2,6 +2,10 @@ const { storagePanelCommand } = require("../systems/storage");
 const { familyPanelCommand } = require("../systems/familyPanel");
 const { registrationPanelCommand } = require("../systems/registration");
 const { leaderPanelCommand } = require("../systems/sanctions");
+const {
+  lineupTomorrowCommand,
+  lineupForceTodayCommand,
+} = require("../systems/lineup");
 
 function getSlashCommands() {
   return [
@@ -9,6 +13,8 @@ function getSlashCommands() {
     familyPanelCommand,
     registrationPanelCommand,
     leaderPanelCommand,
+    lineupTomorrowCommand,
+    lineupForceTodayCommand,
   ];
 }
 
