@@ -1,7 +1,24 @@
 const fs = require("fs");
 const path = require("path");
 
-const DATA_DIR = path.join(__dirname, "..", "data");
+// =====================================================
+// DATENPFAD
+// =====================================================
+//
+// Standard:
+// - Lokal / normal: Projektordner/data
+//
+// Railway mit Volume:
+// - In Railway Variable setzen: DATA_DIR=/data
+// - Volume auf /data mounten
+//
+// Dann bleiben smv-data.json und Backups auch nach Deploys erhalten.
+// =====================================================
+
+const DATA_DIR = process.env.DATA_DIR
+  ? path.resolve(process.env.DATA_DIR)
+  : path.join(__dirname, "..", "data");
+
 const DATA_FILE = path.join(DATA_DIR, "smv-data.json");
 const BACKUP_DIR = path.join(DATA_DIR, "backups");
 
