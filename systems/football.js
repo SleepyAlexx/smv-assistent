@@ -12,7 +12,7 @@ const {
 const CONFIG = require("../config");
 
 const { loadData, saveData } = require("../utils/dataStore");
-const { getGermanDateTime, unixTimestamp } = require("../utils/dates");
+const { unixTimestamp } = require("../utils/dates");
 const { createShortId, getReadableUserName } = require("../utils/format");
 const { hasFootballCreatorPermission } = require("../utils/permissions");
 const { sendToChannel, safeReply } = require("../utils/discord");
@@ -28,20 +28,18 @@ function createFootballHeliSelect() {
   return new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId("football_heli_select")
-      .setPlaceholder("Soll das Event mit Heli oder ohne Heli sein?")
+      .setPlaceholder("Mit Heli oder ohne Heli?")
       .setMinValues(1)
       .setMaxValues(1)
       .addOptions(
         {
           label: "Mit Heli",
           value: "mit_heli",
-          emoji: "🚁",
           description: "Fußball-Event mit Heli",
         },
         {
           label: "Ohne Heli",
           value: "ohne_heli",
-          emoji: "🚫",
           description: "Fußball-Event ohne Heli",
         }
       )
@@ -201,7 +199,7 @@ function createFootballEventEmbed(event) {
 
   return new EmbedBuilder()
     .setColor(CONFIG.embedColor)
-    .setTitle("⚽ • SMV FUSSBALL-EVENT")
+    .setTitle("⚽ • SMV FUSSBALL")
     .setDescription(
       [
         "━━━━━━━━━━━━━━━━━━━━",
@@ -212,9 +210,6 @@ function createFootballEventEmbed(event) {
         `🚁 **Heli:** ${getFootballHeliText(event)}`,
         "",
         event.note ? `📝 **Hinweis:**\n${event.note}` : "📝 **Hinweis:**\n—",
-        "",
-        `👑 **Erstellt von:** <@${event.creatorId}>`,
-        `🕘 **Erstellt am:** <t:${unixTimestamp(event.createdAt)}:F>`,
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
     )
@@ -236,7 +231,7 @@ function createFootballEventEmbed(event) {
       }
     )
     .setFooter({
-      text: `${CONFIG.shortName} • Fußball-Event-ID: ${event.id}`,
+      text: `${CONFIG.shortName} • Fußball-ID: ${event.id}`,
     });
 }
 
@@ -338,7 +333,7 @@ async function handleFootballFamilyButton(client, interaction) {
   });
 
   await safeReply(interaction, {
-    content: "⚽ Wähle zuerst aus, ob das Fußball-Event mit Heli oder ohne Heli ist.",
+    content: "⚽ Wähle aus, ob das Fußball-Event mit Heli oder ohne Heli ist.",
     components: [createFootballHeliSelect()],
     ephemeral: true,
   });
