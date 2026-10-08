@@ -26,31 +26,11 @@ const familyPanelCommand = new SlashCommandBuilder()
 function createFamilyPanelEmbed() {
   return new EmbedBuilder()
     .setColor(CONFIG.embedColor)
-    .setTitle("🐻 • SMV CONTROL CENTER")
+    .setTitle("🐻 • SMV FAMILIENPANEL")
     .setDescription(
       [
         "━━━━━━━━━━━━━━━━━━━━",
-        `**${CONFIG.familyName}**`,
-        "Organisiert. Loyal. Strukturiert.",
-        "",
-        "Willkommen im zentralen Familienbereich.",
-        "Wähle unten aus, was du machen möchtest.",
-        "━━━━━━━━━━━━━━━━━━━━",
-        "",
-        "📋 **FAMILIENVERWALTUNG**",
-        "┃ Abmeldungen sauber einreichen",
-        "┃ Wochenabgabe bestätigen",
-        "┖ Fußball-Events erstellen",
-        "",
-        "⚽ **EVENTBEREICH**",
-        "┃ Fußballspiel gegen andere Familien planen",
-        "┃ Teilnehmer über Buttons sammeln",
-        "┖ Heli-Modus direkt beim Erstellen auswählen",
-        "",
-        "💸 **WOCHENABGABE**",
-        "┃ Abgabe für 1 bis 6 Wochen bestätigen",
-        "┖ Zahlende/r-Rolle wird automatisch verwaltet",
-        "",
+        "Abmeldungen, Fußball-Events und Wochenabgaben verwalten.",
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
     )
@@ -69,7 +49,7 @@ function createFamilyPanelButtons() {
 
     new ButtonBuilder()
       .setCustomId("family_football")
-      .setLabel("Fußball-Event")
+      .setLabel("Fußball")
       .setEmoji("⚽")
       .setStyle(ButtonStyle.Success),
 
