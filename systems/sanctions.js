@@ -81,23 +81,11 @@ const SANCTIONS = [
 
 const SANCTION_MAP = new Map(SANCTIONS.map((sanction) => [sanction.id, sanction]));
 
-// Zwischenspeicher für Leader, die gerade eine Sanktion erstellen
 const sanctionDrafts = new Map();
 
 // =====================================================
 // HELPER
 // =====================================================
-
-function getSanctionStats() {
-  const moneySanctions = SANCTIONS.filter((sanction) => Number(sanction.amount || 0) > 0);
-  const specialSanctions = SANCTIONS.filter((sanction) => sanction.special);
-
-  return {
-    totalRules: SANCTIONS.length,
-    moneyRules: moneySanctions.length,
-    specialRules: specialSanctions.length,
-  };
-}
 
 function getStatusLabel(record) {
   if (record.cancelled) return "STORNIERT";
@@ -118,31 +106,13 @@ function getStatusEmoji(record) {
 // =====================================================
 
 function createLeaderPanelEmbed() {
-  const stats = getSanctionStats();
-
   return new EmbedBuilder()
     .setColor(CONFIG.embedColor)
-    .setTitle("👑 • SMV LEADER CENTER")
+    .setTitle("👑 • LEADER CENTER")
     .setDescription(
       [
         "━━━━━━━━━━━━━━━━━━━━",
-        `Zentraler Verwaltungsbereich der Familie **${CONFIG.familyName}**.`,
-        "",
-        "Hier verwaltet die Leaderschaft Sanktionen, Wochenabgaben und wichtige Familienentscheidungen.",
-        "",
-        "⚠️ **SANKTIONSSYSTEM**",
-        `┃ Regelkatalog: **${stats.totalRules} Einträge**`,
-        `┃ Geldstrafen: **${stats.moneyRules} Einträge**`,
-        `┖ Sonderstrafen: **${stats.specialRules} Einträge**`,
-        "",
-        "💸 **WOCHENABGABE**",
-        "┃ Abgaben temporär aussetzen",
-        "┃ aktive Aussetzungen prüfen",
-        "┖ Zahlende/r-System sauber verwalten",
-        "",
-        "🛡️ **LEADER-HINWEIS**",
-        "┃ Nutze Sanktionen nur nachvollziehbar.",
-        "┖ Jede Aktion wird gespeichert und geloggt.",
+        "Sanktionen und Wochenabgaben verwalten.",
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
     )
@@ -155,13 +125,13 @@ function createLeaderPanelButtons() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("leader_create_sanction")
-      .setLabel("Sanktion erstellen")
+      .setLabel("Sanktion")
       .setEmoji("⚠️")
       .setStyle(ButtonStyle.Danger),
 
     new ButtonBuilder()
       .setCustomId("leader_weekly_manage")
-      .setLabel("WA verwalten")
+      .setLabel("Wochenabgabe")
       .setEmoji("💸")
       .setStyle(ButtonStyle.Primary)
   );
