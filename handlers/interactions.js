@@ -9,10 +9,13 @@ const { handleWeeklyPaymentInteraction } = require("../systems/weeklyPayments");
 
 async function handleInteraction(client, interaction) {
   try {
+    // WICHTIG:
+    // Fußball muss vor FamilyPanel verarbeitet werden,
+    // damit der Button "family_football" sicher vom Fußball-System abgefangen wird.
+    if (await handleFootballInteraction(client, interaction)) return;
     if (await handleStorageInteraction(client, interaction)) return;
     if (await handleAbsenceInteraction(client, interaction)) return;
     if (await handleFamilyPanelInteraction(client, interaction)) return;
-    if (await handleFootballInteraction(client, interaction)) return;
     if (await handleRegistrationInteraction(client, interaction)) return;
     if (await handleSanctionsInteraction(client, interaction)) return;
     if (await handleLineupInteraction(client, interaction)) return;
