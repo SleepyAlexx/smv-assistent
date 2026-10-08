@@ -221,35 +221,30 @@ function createStoragePanelEmbed(storage) {
 
   const embed = new EmbedBuilder()
     .setColor(CONFIG.embedColor)
-    .setTitle("📦 • SMV LAGERZENTRALE")
+    .setTitle("📦 • SMV LAGER")
     .setDescription(
       [
         "━━━━━━━━━━━━━━━━━━━━",
-        "Verwalte hier den kompletten Familienbestand.",
+        "Familienbestand verwalten.",
         "",
-        "📊 **STATUS**",
-        `┃ Kategorien: **${stats.categoryCount}**`,
-        `┃ Gegenstände: **${stats.itemCount}**`,
-        `┖ Gesamtmenge: **${stats.totalAmount.toLocaleString("de-DE")}x**`,
-        "",
-        "🛠️ **AKTIONEN**",
-        "┃ Einlagern, Auslagern und Verwaltung laufen über die Buttons.",
-        "┖ Änderungen werden automatisch gespeichert und geloggt.",
+        `Kategorien: **${stats.categoryCount}**`,
+        `Gegenstände: **${stats.itemCount}**`,
+        `Gesamtmenge: **${stats.totalAmount.toLocaleString("de-DE")}x**`,
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
     )
     .setFooter({
-      text: `${CONFIG.shortName} • Lagerzentrale • ${formatGermanDateTimeFromMs(Date.now())}`,
+      text: `${CONFIG.shortName} • Lager • ${formatGermanDateTimeFromMs(Date.now())}`,
     });
 
   if (categories.length === 0) {
     embed.addFields({
-      name: "📦 LAGERBESTAND",
+      name: "📦 Lagerbestand",
       value: [
         "┖ Noch keine Kategorien vorhanden",
         "",
         "Erstelle die erste Kategorie über:",
-        "`⚙️ Lager verwalten` → `Kategorie hinzufügen`",
+        "`🛠️ Verwaltung` → `Kategorie hinzufügen`",
       ].join("\n"),
       inline: false,
     });
@@ -589,14 +584,21 @@ async function logStorageAction(client, actionData) {
 // PANEL SENDEN / AKTUALISIEREN
 // =====================================================
 
-async function updateStoragePanel(client) {
+async function updateStoragePanel(client, options = {}) {
+  const allowCreate = Boolean(options.allowCreate);
+
   const data = loadData();
   const storage = ensureStorage(data);
   data.storage = storage;
   saveData(data);
 
   const channel = await client.channels.fetch(CONFIG.storageChannelId).catch(() => null);
-  if (!channel || !channel.messages) return null;
+  if (!channel || !channel.messages) {
+    return {
+      message: null,
+      status: "channel-missing",
+    };
+  }
 
   const payload = {
     embeds: [createStoragePanelEmbed(storage)],
@@ -608,8 +610,27 @@ async function updateStoragePanel(client) {
 
     if (oldMessage) {
       await oldMessage.edit(payload).catch(() => null);
-      return oldMessage;
+
+      return {
+        message: oldMessage,
+        status: "updated",
+      };
     }
+
+    // Alte Panel-Nachricht wurde gelöscht oder ist nicht mehr auffindbar.
+    // Wichtig: Bei normalen Lageraktionen wird jetzt KEIN neues Panel gespammt.
+    storage.panelMessageId = null;
+    data.storage = storage;
+    saveData(data);
+  }
+
+  if (!allowCreate) {
+    console.log("⚠️ Lagerpanel wurde nicht gefunden. Kein neues Panel automatisch gesendet.");
+
+    return {
+      message: null,
+      status: "panel-missing",
+    };
   }
 
   const newMessage = await channel.send(payload).catch(() => null);
@@ -618,9 +639,17 @@ async function updateStoragePanel(client) {
     storage.panelMessageId = newMessage.id;
     data.storage = storage;
     saveData(data);
+
+    return {
+      message: newMessage,
+      status: "created",
+    };
   }
 
-  return newMessage;
+  return {
+    message: null,
+    status: "send-failed",
+  };
 }
 
 async function sendStoragePanelCommand(client, interaction) {
@@ -631,17 +660,19 @@ async function sendStoragePanelCommand(client, interaction) {
     });
   }
 
-  const message = await updateStoragePanel(client);
+  const result = await updateStoragePanel(client, { allowCreate: true });
 
-  if (!message) {
+  if (!result.message) {
     return safeReply(interaction, {
       content: "❌ Lagerpanel konnte nicht gesendet werden. Bitte prüfe Channel-ID und Bot-Rechte.",
       ephemeral: true,
     });
   }
 
+  const actionText = result.status === "created" ? "gesendet" : "aktualisiert";
+
   return safeReply(interaction, {
-    content: `✅ Lagerpanel wurde in <#${CONFIG.storageChannelId}> gesendet/aktualisiert.`,
+    content: `✅ Lagerpanel wurde in <#${CONFIG.storageChannelId}> ${actionText}.`,
     ephemeral: true,
   });
 }
@@ -843,7 +874,7 @@ async function handleStorageSelect(client, interaction) {
       data.storage = storage;
       saveData(data);
 
-      await updateStoragePanel(client);
+      await updateStoragePanel(client, { allowCreate: false });
 
       await safeReply(interaction, {
         content: `✅ Kategorie **${category.name}** wurde gelöscht.`,
@@ -948,7 +979,7 @@ async function handleStorageModal(client, interaction) {
     data.storage = storage;
     saveData(data);
 
-    await updateStoragePanel(client);
+    await updateStoragePanel(client, { allowCreate: false });
 
     await safeReply(interaction, {
       content: `✅ Kategorie **${categoryEmoji} ${categoryName}** wurde erstellt.`,
@@ -1070,7 +1101,7 @@ async function processStorageAmountChange(client, interaction, categoryId, actio
   data.storage = storage;
   saveData(data);
 
-  await updateStoragePanel(client);
+  await updateStoragePanel(client, { allowCreate: false });
 
   await logStorageAction(client, {
     action,
@@ -1153,7 +1184,7 @@ async function processStorageSetItem(client, interaction, categoryId, mode) {
   data.storage = storage;
   saveData(data);
 
-  await updateStoragePanel(client);
+  await updateStoragePanel(client, { allowCreate: false });
 
   await logStorageAction(client, {
     action: "manage",
@@ -1226,7 +1257,7 @@ async function processStorageDeleteItem(client, interaction, categoryId) {
   data.storage = storage;
   saveData(data);
 
-  await updateStoragePanel(client);
+  await updateStoragePanel(client, { allowCreate: false });
 
   await logStorageAction(client, {
     action: "manage",
