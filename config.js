@@ -46,12 +46,12 @@ module.exports = {
   footballEventChannelId: "1451331983459356836",
 
   // Lagersystem
-  storageChannelId: "1557521371695939644", // Lagerbestand / Lagerpanel
+  storageChannelId: "1557521371695939644",
 
   // Lager-Logs
-  storageDepositLogChannelId: "1557424128439484427", // Eingelagert
-  storageWithdrawLogChannelId: "1557424160001761340", // Ausgelagert
-  storageLogChannelId: "1557493683446611968", // Lager-Logs / Verwaltung
+  storageDepositLogChannelId: "1557424128439484427",
+  storageWithdrawLogChannelId: "1557424160001761340",
+  storageLogChannelId: "1557493683446611968",
 
   storageDepositRoleIds: [
     "1451315550394515516",
@@ -116,7 +116,7 @@ module.exports = {
     "1451629804221894868",
   ],
 
-  // Diese Zusatzrollen dürfen Sanktionen erstellen, ohne komplette Leaderschaftsrechte zu bekommen
+  // Diese Zusatzrollen dürfen Sanktionen erstellen
   sanctionCreatorRoleIds: [
     "1455642939131691141",
   ],
@@ -125,5 +125,8 @@ module.exports = {
   footballCreatorRoleIds: [
     "1455643015820480582",
     "1451629804221894868",
+    "1451315550394515516",
+    "1434318021412786317",
+    "1537919333240545370",
   ],
 };
