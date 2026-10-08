@@ -66,7 +66,23 @@ async function runInitialChecks(client) {
     console.error("❌ Fehler beim initialen Abmeldungs-Löschcheck:", error);
   }
 
-  await runSchedulerOnce(client, "initial");
+  try {
+    await checkLineupClosures(client);
+  } catch (error) {
+    console.error("❌ Fehler beim initialen Aufstellungs-Schließcheck:", error);
+  }
+
+  try {
+    await checkOverdueSanctions(client);
+  } catch (error) {
+    console.error("❌ Fehler beim initialen Sanktionscheck:", error);
+  }
+
+  console.log("✅ Initiale Bot-Prüfungen abgeschlossen.");
+
+  // WICHTIG:
+  // Beim Bot-Start werden bewusst KEINE Aufstellungen und KEINE Reminder nachträglich gesendet.
+  // Dadurch kommt nach einem Railway-Deploy / Bot-Neustart keine alte Aufstellungserinnerung mehr.
 }
 
 function startScheduler(client) {
