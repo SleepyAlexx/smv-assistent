@@ -42,6 +42,9 @@ module.exports = {
   backupLogChannelId: "1524252653922816102",
   sanctionDueDays: 7,
 
+  // Familienpanel
+  familyPanelChannelId: "1508301797700403340",
+
   // Fußball-Event-Channel
   footballEventChannelId: "1451331983459356836",
 
@@ -74,7 +77,7 @@ module.exports = {
     "1537919333240545370",
   ],
 
-  // Familienpanel / Abmeldung
+  // Abmeldungen
   absenceChannelId: "1522813672244908135",
   absenceDeleteLogChannelId: "1527182554640420904",
 
