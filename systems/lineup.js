@@ -121,7 +121,15 @@ function shouldSendLineupReminder(lineup) {
   const reminderMinutes = getLineupReminderMinutes(lineup);
   const startMinutes = parseLineupStartMinutes(getLineupStartText(lineup));
 
-  return currentMinutes >= reminderMinutes && currentMinutes < startMinutes;
+  // WICHTIG:
+  // Reminder wird nur exakt zur Reminder-Minute gesendet.
+  // Dadurch wird nach Bot-Neustart / Railway-Deploy keine alte Erinnerung nachgeholt.
+  if (currentMinutes !== reminderMinutes) return false;
+
+  // Extra Sicherheit: Falls Startzeit erreicht oder vorbei ist, niemals erinnern.
+  if (currentMinutes >= startMinutes) return false;
+
+  return true;
 }
 
 function createEmptyLineup(dateKey, dateText, weekday, createdBy = null) {
@@ -1007,20 +1015,24 @@ async function handleLineupButton(client, interaction) {
 
   if (interaction.customId.startsWith("lineup_cancel_confirm_")) {
     const dateKey = interaction.customId.replace("lineup_cancel_confirm_", "");
+
     await interaction.update({
       content: "⏳ Aufstellung wird abgesagt...",
       components: [],
     });
+
     await cancelLineup(client, interaction, dateKey, true);
     return true;
   }
 
   if (interaction.customId.startsWith("lineup_reopen_confirm_")) {
     const dateKey = interaction.customId.replace("lineup_reopen_confirm_", "");
+
     await interaction.update({
       content: "⏳ Aufstellung wird wieder geöffnet...",
       components: [],
     });
+
     await reopenLineup(client, interaction, dateKey, true);
     return true;
   }
@@ -1030,6 +1042,7 @@ async function handleLineupButton(client, interaction) {
       content: "❌ Aktion abgebrochen.",
       components: [],
     });
+
     return true;
   }
 
