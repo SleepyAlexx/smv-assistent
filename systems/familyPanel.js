@@ -73,7 +73,9 @@ async function sendFamilyPanel(client, interaction) {
     });
   }
 
-  const message = await sendToChannel(client, CONFIG.absenceChannelId, {
+  const familyPanelChannelId = CONFIG.familyPanelChannelId || CONFIG.absenceChannelId;
+
+  const message = await sendToChannel(client, familyPanelChannelId, {
     embeds: [createFamilyPanelEmbed()],
     components: [createFamilyPanelButtons()],
   });
@@ -86,7 +88,7 @@ async function sendFamilyPanel(client, interaction) {
   }
 
   return safeReply(interaction, {
-    content: `✅ Familienpanel wurde in <#${CONFIG.absenceChannelId}> gesendet.`,
+    content: `✅ Familienpanel wurde in <#${familyPanelChannelId}> gesendet.`,
     ephemeral: true,
   });
 }
