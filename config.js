@@ -124,12 +124,15 @@ module.exports = {
     "1455642939131691141",
   ],
 
-  // Nur diese Rollen dürfen über das Familienpanel Fußball-Events erstellen
+  // Nur diese Rollen dürfen Fußball-Events erstellen
   footballCreatorRoleIds: [
     "1455643015820480582",
-    "1451629804221894868",
     "1451315550394515516",
-    "1434318021412786317",
-    "1537919333240545370",
+  ],
+
+  // Nur diese Rollen dürfen Fußball-Events absagen, wieder öffnen oder Uhrzeit ändern
+  footballManageRoleIds: [
+    "1455643015820480582",
+    "1451315550394515516",
   ],
 };
