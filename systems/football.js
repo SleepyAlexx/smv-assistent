@@ -12,13 +12,25 @@ const {
 const CONFIG = require("../config");
 
 const { loadData, saveData } = require("../utils/dataStore");
-const { unixTimestamp } = require("../utils/dates");
+const { getGermanDateTime, unixTimestamp } = require("../utils/dates");
 const { createShortId, getReadableUserName } = require("../utils/format");
 const { hasFootballCreatorPermission } = require("../utils/permissions");
 const { sendToChannel, safeReply } = require("../utils/discord");
 
 // Zwischenspeicher: Wer gerade ein Fußball-Event erstellt
 const footballDrafts = new Map();
+
+// =====================================================
+// RECHTE
+// =====================================================
+
+function hasFootballManagePermission(member) {
+  if (!member || !member.roles || !member.roles.cache) return false;
+
+  const allowedRoleIds = CONFIG.footballManageRoleIds || [];
+
+  return allowedRoleIds.some((roleId) => member.roles.cache.has(roleId));
+}
 
 // =====================================================
 // HELI-AUSWAHL / MODAL
@@ -35,11 +47,13 @@ function createFootballHeliSelect() {
         {
           label: "Mit Heli",
           value: "mit_heli",
+          emoji: "🚁",
           description: "Fußball-Event mit Heli",
         },
         {
           label: "Ohne Heli",
           value: "ohne_heli",
+          emoji: "🚫",
           description: "Fußball-Event ohne Heli",
         }
       )
@@ -106,6 +120,32 @@ function createFootballEventModal() {
   return modal;
 }
 
+function createFootballTimeModal(eventId) {
+  const modal = new ModalBuilder()
+    .setCustomId(`football_time_modal_${eventId}`)
+    .setTitle("🕘 Fußball-Uhrzeit ändern");
+
+  const timeInput = new TextInputBuilder()
+    .setCustomId("football_new_time")
+    .setLabel("Neue Uhrzeit")
+    .setPlaceholder("z. B. 21:00 Uhr")
+    .setStyle(TextInputStyle.Short)
+    .setMinLength(2)
+    .setMaxLength(30)
+    .setRequired(true);
+
+  modal.addComponents(new ActionRowBuilder().addComponents(timeInput));
+
+  return modal;
+}
+
+function normalizeFootballTimeText(input) {
+  const value = String(input || "").trim();
+  if (!value) return "20:30 Uhr";
+  if (/uhr/i.test(value)) return value;
+  return `${value} Uhr`;
+}
+
 // =====================================================
 // EVENT-DATEN
 // =====================================================
@@ -131,6 +171,17 @@ function createFootballEventRecord({
     createdAt: Date.now(),
     updatedAt: Date.now(),
     messageId: null,
+
+    cancelled: false,
+    cancelledBy: null,
+    cancelledAt: null,
+
+    reopenedBy: null,
+    reopenedAt: null,
+
+    lastTimeChangeBy: null,
+    lastTimeChangeAt: null,
+
     users: {},
   };
 }
@@ -139,6 +190,11 @@ function getFootballHeliText(event) {
   if (event.heliMode === "mit_heli") return "Mit Heli";
   if (event.heliMode === "ohne_heli") return "Ohne Heli";
   return "Nicht angegeben";
+}
+
+function getFootballStatusText(event) {
+  if (event.cancelled) return "Abgesagt";
+  return "Offen";
 }
 
 function getFootballUsersByStatus(event, status) {
@@ -197,9 +253,11 @@ function createFootballEventEmbed(event) {
   const absentUsers = getFootballUsersByStatus(event, "absent");
   const unsureUsers = getFootballUsersByStatus(event, "unsure");
 
+  const statusText = getFootballStatusText(event);
+
   return new EmbedBuilder()
-    .setColor(CONFIG.embedColor)
-    .setTitle("⚽ • SMV FUSSBALL")
+    .setColor(event.cancelled ? CONFIG.dangerColor : CONFIG.embedColor)
+    .setTitle(event.cancelled ? "🛑 • SMV FUSSBALL ABGESAGT" : "⚽ • SMV FUSSBALL")
     .setDescription(
       [
         "━━━━━━━━━━━━━━━━━━━━",
@@ -208,10 +266,24 @@ function createFootballEventEmbed(event) {
         `🕘 **Uhrzeit:** ${event.timeText}`,
         `📍 **Ort:** ${event.placeText}`,
         `🚁 **Heli:** ${getFootballHeliText(event)}`,
+        `📌 **Status:** ${statusText}`,
         "",
         event.note ? `📝 **Hinweis:**\n${event.note}` : "📝 **Hinweis:**\n—",
+        "",
+        event.cancelled
+          ? `🛑 **Abgesagt von:** <@${event.cancelledBy}>`
+          : null,
+        event.cancelledAt
+          ? `🕘 **Abgesagt am:** <t:${unixTimestamp(event.cancelledAt)}:F>`
+          : null,
+        event.lastTimeChangeBy
+          ? `🕘 **Uhrzeit zuletzt geändert von:** <@${event.lastTimeChangeBy}>`
+          : null,
+        event.lastTimeChangeAt
+          ? `🕘 **Geändert am:** <t:${unixTimestamp(event.lastTimeChangeAt)}:F>`
+          : null,
         "━━━━━━━━━━━━━━━━━━━━",
-      ].join("\n")
+      ].filter(Boolean).join("\n")
     )
     .addFields(
       {
@@ -240,25 +312,125 @@ function createFootballEventButtons(event) {
   const absentUsers = getFootballUsersByStatus(event, "absent");
   const unsureUsers = getFootballUsersByStatus(event, "unsure");
 
-  return new ActionRowBuilder().addComponents(
+  const participationRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`football_present_${event.id}`)
       .setLabel(`${presentUsers.length}`)
       .setEmoji("✅")
-      .setStyle(ButtonStyle.Success),
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(Boolean(event.cancelled)),
 
     new ButtonBuilder()
       .setCustomId(`football_absent_${event.id}`)
       .setLabel(`${absentUsers.length}`)
       .setEmoji("❌")
-      .setStyle(ButtonStyle.Danger),
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(Boolean(event.cancelled)),
 
     new ButtonBuilder()
       .setCustomId(`football_unsure_${event.id}`)
       .setLabel(`${unsureUsers.length}`)
       .setEmoji("⏳")
       .setStyle(ButtonStyle.Secondary)
+      .setDisabled(Boolean(event.cancelled))
   );
+
+  const managementRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`football_cancel_${event.id}`)
+      .setLabel("Fußball absagen")
+      .setEmoji("🛑")
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(Boolean(event.cancelled)),
+
+    new ButtonBuilder()
+      .setCustomId(`football_reopen_${event.id}`)
+      .setLabel("Fußball wieder öffnen")
+      .setEmoji("🔓")
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(!event.cancelled),
+
+    new ButtonBuilder()
+      .setCustomId(`football_time_${event.id}`)
+      .setLabel("Uhrzeit ändern")
+      .setEmoji("🕘")
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  return [participationRow, managementRow];
+}
+
+// =====================================================
+// ANKÜNDIGUNGEN
+// =====================================================
+
+async function announceFootballCancelled(client, event, leaderId) {
+  await sendToChannel(client, CONFIG.footballEventChannelId, {
+    content: [
+      `<@&${CONFIG.familyMemberRoleId}>`,
+      "",
+      "🛑 **SMV FUSSBALL ABGESAGT**",
+      "",
+      "Das Fußball-Event wurde abgesagt.",
+      "",
+      `⚔️ **Gegner:** ${event.opponent}`,
+      `📅 **Datum:** ${event.dateText}`,
+      `🕘 **Uhrzeit:** ${event.timeText}`,
+      `👑 **Abgesagt von:** <@${leaderId}>`,
+    ].join("\n"),
+    allowedMentions: {
+      roles: [CONFIG.familyMemberRoleId],
+      users: [leaderId],
+    },
+  });
+}
+
+async function announceFootballReopened(client, event, leaderId) {
+  await sendToChannel(client, CONFIG.footballEventChannelId, {
+    content: [
+      `<@&${CONFIG.familyMemberRoleId}>`,
+      "",
+      "🔓 **SMV FUSSBALL WIEDER GEÖFFNET**",
+      "",
+      "Das Fußball-Event wurde wieder geöffnet.",
+      "",
+      `⚔️ **Gegner:** ${event.opponent}`,
+      `📅 **Datum:** ${event.dateText}`,
+      `🕘 **Uhrzeit:** ${event.timeText}`,
+      `👑 **Geöffnet von:** <@${leaderId}>`,
+      "",
+      "Ihr könnt euch wieder anmelden.",
+    ].join("\n"),
+    allowedMentions: {
+      roles: [CONFIG.familyMemberRoleId],
+      users: [leaderId],
+    },
+  });
+}
+
+async function announceFootballTimeChanged(client, event, oldTime, newTime, leaderId) {
+  await sendToChannel(client, CONFIG.footballEventChannelId, {
+    content: [
+      `<@&${CONFIG.familyMemberRoleId}>`,
+      "",
+      "🕘 **FUSSBALL-UHRZEIT GEÄNDERT**",
+      "",
+      "Die Uhrzeit für das Fußball-Event wurde geändert.",
+      "",
+      `⚔️ **Gegner:** ${event.opponent}`,
+      `📅 **Datum:** ${event.dateText}`,
+      `🕘 **Alte Uhrzeit:** ${oldTime}`,
+      `🕘 **Neue Uhrzeit:** ${newTime}`,
+      `👑 **Geändert von:** <@${leaderId}>`,
+      `🕘 **Zeitpunkt:** ${getGermanDateTime()}`,
+      "",
+      "Bitte beachtet die neue Uhrzeit.",
+    ].join("\n"),
+    allowedMentions: {
+      roles: [CONFIG.familyMemberRoleId],
+      users: [leaderId],
+    },
+  });
 }
 
 // =====================================================
@@ -276,7 +448,7 @@ async function updateFootballEventMessage(client, event) {
 
   await message.edit({
     embeds: [createFootballEventEmbed(event)],
-    components: [createFootballEventButtons(event)],
+    components: createFootballEventButtons(event),
   }).catch(() => null);
 
   return message;
@@ -286,7 +458,7 @@ async function postFootballEvent(client, interaction, event) {
   const message = await sendToChannel(client, CONFIG.footballEventChannelId, {
     content: `<@&${CONFIG.familyMemberRoleId}>`,
     embeds: [createFootballEventEmbed(event)],
-    components: [createFootballEventButtons(event)],
+    components: createFootballEventButtons(event),
     allowedMentions: { roles: [CONFIG.familyMemberRoleId] },
   });
 
@@ -375,46 +547,93 @@ async function handleFootballHeliSelect(client, interaction) {
 
 async function handleFootballModal(client, interaction) {
   if (!interaction.isModalSubmit()) return false;
-  if (interaction.customId !== "football_event_modal") return false;
 
-  if (!hasFootballCreatorPermission(interaction.member)) {
-    await safeReply(interaction, {
-      content: "❌ Du hast keine Berechtigung, Fußball-Events zu erstellen.",
-      ephemeral: true,
+  if (interaction.customId === "football_event_modal") {
+    if (!hasFootballCreatorPermission(interaction.member)) {
+      await safeReply(interaction, {
+        content: "❌ Du hast keine Berechtigung, Fußball-Events zu erstellen.",
+        ephemeral: true,
+      });
+      return true;
+    }
+
+    const draft = footballDrafts.get(interaction.user.id);
+
+    if (!draft?.heliMode) {
+      await safeReply(interaction, {
+        content: "❌ Heli-Auswahl wurde nicht gefunden. Bitte starte das Fußball-Event nochmal über das Familienpanel.",
+        ephemeral: true,
+      });
+      return true;
+    }
+
+    const opponent = String(interaction.fields.getTextInputValue("football_opponent") || "").trim();
+    const dateText = String(interaction.fields.getTextInputValue("football_date") || "").trim();
+    const timeText = String(interaction.fields.getTextInputValue("football_time") || "").trim();
+    const placeText = String(interaction.fields.getTextInputValue("football_place") || "").trim();
+    const note = String(interaction.fields.getTextInputValue("football_note") || "").trim();
+
+    const event = createFootballEventRecord({
+      creatorId: interaction.user.id,
+      opponent,
+      dateText,
+      timeText,
+      placeText,
+      note,
+      heliMode: draft.heliMode,
     });
+
+    footballDrafts.delete(interaction.user.id);
+
+    await postFootballEvent(client, interaction, event);
     return true;
   }
 
-  const draft = footballDrafts.get(interaction.user.id);
+  if (interaction.customId.startsWith("football_time_modal_")) {
+    const eventId = interaction.customId.replace("football_time_modal_", "");
 
-  if (!draft?.heliMode) {
+    if (!hasFootballManagePermission(interaction.member)) {
+      await safeReply(interaction, {
+        content: "❌ Du hast keine Berechtigung, die Fußball-Uhrzeit zu ändern.",
+        ephemeral: true,
+      });
+      return true;
+    }
+
+    const data = loadData();
+    const event = data.footballEvents?.[eventId];
+
+    if (!event) {
+      await safeReply(interaction, {
+        content: "❌ Dieses Fußball-Event wurde nicht im Speicher gefunden.",
+        ephemeral: true,
+      });
+      return true;
+    }
+
+    const oldTime = event.timeText;
+    const newTime = normalizeFootballTimeText(interaction.fields.getTextInputValue("football_new_time"));
+
+    event.timeText = newTime;
+    event.lastTimeChangeBy = interaction.user.id;
+    event.lastTimeChangeAt = Date.now();
+    event.updatedAt = Date.now();
+
+    data.footballEvents[eventId] = event;
+    saveData(data);
+
+    await updateFootballEventMessage(client, event);
+    await announceFootballTimeChanged(client, event, oldTime, newTime, interaction.user.id);
+
     await safeReply(interaction, {
-      content: "❌ Heli-Auswahl wurde nicht gefunden. Bitte starte das Fußball-Event nochmal über das Familienpanel.",
+      content: `✅ Fußball-Uhrzeit wurde von **${oldTime}** auf **${newTime}** geändert.`,
       ephemeral: true,
     });
+
     return true;
   }
 
-  const opponent = String(interaction.fields.getTextInputValue("football_opponent") || "").trim();
-  const dateText = String(interaction.fields.getTextInputValue("football_date") || "").trim();
-  const timeText = String(interaction.fields.getTextInputValue("football_time") || "").trim();
-  const placeText = String(interaction.fields.getTextInputValue("football_place") || "").trim();
-  const note = String(interaction.fields.getTextInputValue("football_note") || "").trim();
-
-  const event = createFootballEventRecord({
-    creatorId: interaction.user.id,
-    opponent,
-    dateText,
-    timeText,
-    placeText,
-    note,
-    heliMode: draft.heliMode,
-  });
-
-  footballDrafts.delete(interaction.user.id);
-
-  await postFootballEvent(client, interaction, event);
-  return true;
+  return false;
 }
 
 async function handleFootballParticipationButton(client, interaction) {
@@ -444,6 +663,14 @@ async function handleFootballParticipationButton(client, interaction) {
   if (!event) {
     await safeReply(interaction, {
       content: "❌ Dieses Fußball-Event wurde nicht im Speicher gefunden.",
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  if (event.cancelled) {
+    await safeReply(interaction, {
+      content: "❌ Dieses Fußball-Event wurde abgesagt.",
       ephemeral: true,
     });
     return true;
@@ -483,10 +710,117 @@ async function handleFootballParticipationButton(client, interaction) {
   return true;
 }
 
+async function handleFootballManageButton(client, interaction) {
+  if (!interaction.isButton()) return false;
+
+  const customId = interaction.customId;
+
+  let action = null;
+  let eventId = null;
+
+  if (customId.startsWith("football_cancel_")) {
+    action = "cancel";
+    eventId = customId.replace("football_cancel_", "");
+  } else if (customId.startsWith("football_reopen_")) {
+    action = "reopen";
+    eventId = customId.replace("football_reopen_", "");
+  } else if (customId.startsWith("football_time_")) {
+    action = "time";
+    eventId = customId.replace("football_time_", "");
+  } else {
+    return false;
+  }
+
+  if (!hasFootballManagePermission(interaction.member)) {
+    await safeReply(interaction, {
+      content: "❌ Du hast keine Berechtigung, dieses Fußball-Event zu verwalten.",
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  const data = loadData();
+  const event = data.footballEvents?.[eventId];
+
+  if (!event) {
+    await safeReply(interaction, {
+      content: "❌ Dieses Fußball-Event wurde nicht im Speicher gefunden.",
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  if (action === "time") {
+    await interaction.showModal(createFootballTimeModal(eventId));
+    return true;
+  }
+
+  if (action === "cancel") {
+    if (event.cancelled) {
+      await safeReply(interaction, {
+        content: "ℹ️ Dieses Fußball-Event ist bereits abgesagt.",
+        ephemeral: true,
+      });
+      return true;
+    }
+
+    event.cancelled = true;
+    event.cancelledBy = interaction.user.id;
+    event.cancelledAt = Date.now();
+    event.updatedAt = Date.now();
+
+    data.footballEvents[eventId] = event;
+    saveData(data);
+
+    await updateFootballEventMessage(client, event);
+    await announceFootballCancelled(client, event, interaction.user.id);
+
+    await safeReply(interaction, {
+      content: "✅ Fußball-Event wurde abgesagt und die Familie wurde informiert.",
+      ephemeral: true,
+    });
+
+    return true;
+  }
+
+  if (action === "reopen") {
+    if (!event.cancelled) {
+      await safeReply(interaction, {
+        content: "ℹ️ Dieses Fußball-Event ist bereits geöffnet.",
+        ephemeral: true,
+      });
+      return true;
+    }
+
+    event.cancelled = false;
+    event.cancelledBy = null;
+    event.cancelledAt = null;
+    event.reopenedBy = interaction.user.id;
+    event.reopenedAt = Date.now();
+    event.updatedAt = Date.now();
+
+    data.footballEvents[eventId] = event;
+    saveData(data);
+
+    await updateFootballEventMessage(client, event);
+    await announceFootballReopened(client, event, interaction.user.id);
+
+    await safeReply(interaction, {
+      content: "✅ Fußball-Event wurde wieder geöffnet und die Familie wurde informiert.",
+      ephemeral: true,
+    });
+
+    return true;
+  }
+
+  return false;
+}
+
 async function handleFootballInteraction(client, interaction) {
   if (await handleFootballFamilyButton(client, interaction)) return true;
   if (await handleFootballHeliSelect(client, interaction)) return true;
   if (await handleFootballModal(client, interaction)) return true;
+  if (await handleFootballManageButton(client, interaction)) return true;
   if (await handleFootballParticipationButton(client, interaction)) return true;
 
   return false;
