@@ -28,12 +28,16 @@ const { formatGermanDateTimeFromMs } = require("../utils/dates");
 const { sendToChannel, safeReply } = require("../utils/discord");
 
 // =====================================================
-// SLASH COMMAND
+// SLASH COMMANDS
 // =====================================================
 
 const storagePanelCommand = new SlashCommandBuilder()
   .setName("lagerpanel")
   .setDescription("Sendet oder aktualisiert das SMV-Lagerpanel.");
+
+const storageRescueCommand = new SlashCommandBuilder()
+  .setName("lager-retten")
+  .setDescription("Rettet Lagerdaten aus einer alten sichtbaren Lagerpanel-Nachricht.");
 
 // =====================================================
 // GRUNDLAGE
@@ -482,6 +486,265 @@ function createManageItemModal(type, categoryId) {
 }
 
 // =====================================================
+// LAGER-RETTUNG
+// =====================================================
+
+function cleanRescueCategoryName(rawName) {
+  return String(rawName || "")
+    .replace(/\*\*/g, "")
+    .replace(/[┃┖└┗┣╰╚]/g, "")
+    .replace(/^[^\p{L}\p{N}]+/u, "")
+    .trim();
+}
+
+function parseRescueAmount(rawAmount) {
+  const cleaned = String(rawAmount || "")
+    .replace(/\./g, "")
+    .replace(/,/g, "")
+    .replace(/[^\d]/g, "");
+
+  const amount = Number(cleaned);
+  if (!Number.isInteger(amount) || amount < 0) return 0;
+
+  return amount;
+}
+
+function parseItemLineFromEmbedValue(line) {
+  const cleanedLine = String(line || "")
+    .replace(/\*\*/g, "")
+    .replace(/[┃┖└┗┣╰╚]/g, "")
+    .trim();
+
+  if (!cleanedLine) return null;
+  if (/keine einträge/i.test(cleanedLine)) return null;
+  if (!cleanedLine.includes(":")) return null;
+
+  const [rawName, ...rest] = cleanedLine.split(":");
+  const itemName = normalizeItemName(rawName);
+  const amount = parseRescueAmount(rest.join(":"));
+
+  if (!itemName) return null;
+
+  return {
+    itemName,
+    amount,
+  };
+}
+
+function looksLikeStorageField(field) {
+  const name = String(field?.name || "").toLowerCase();
+  const value = String(field?.value || "").toLowerCase();
+
+  if (!field?.name || !field?.value) return false;
+
+  if (name.includes("status")) return false;
+  if (name.includes("aktion")) return false;
+  if (name.includes("lagerbestand")) return false;
+  if (name.includes("info")) return false;
+
+  if (value.includes("kategorien:")) return false;
+  if (value.includes("gegenstände:")) return false;
+  if (value.includes("gesamtmenge:")) return false;
+  if (value.includes("erstelle die erste kategorie")) return false;
+
+  return value.includes(":") || value.includes("keine einträge");
+}
+
+function getEmojiFromCategoryName(rawName) {
+  const firstToken = String(rawName || "").trim().split(/\s+/)[0];
+
+  if (!firstToken) return "📦";
+  if (/^[\p{L}\p{N}]/u.test(firstToken)) return "📦";
+
+  return firstToken.slice(0, 10) || "📦";
+}
+
+function parseStorageFromEmbed(embed) {
+  const result = {
+    categories: {},
+    categoryCount: 0,
+    itemCount: 0,
+  };
+
+  const fields = embed.fields || [];
+
+  for (const field of fields) {
+    if (!looksLikeStorageField(field)) continue;
+
+    const categoryName = cleanRescueCategoryName(field.name);
+    const categoryId = normalizeCategoryId(categoryName);
+    const categoryEmoji = getEmojiFromCategoryName(field.name);
+
+    if (!categoryId || !categoryName) continue;
+
+    if (!result.categories[categoryId]) {
+      result.categories[categoryId] = {
+        id: categoryId,
+        name: categoryName,
+        emoji: categoryEmoji,
+        items: {},
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      result.categoryCount += 1;
+    }
+
+    const lines = String(field.value || "").split("\n");
+
+    for (const line of lines) {
+      const parsedItem = parseItemLineFromEmbedValue(line);
+      if (!parsedItem) continue;
+
+      const itemId = createStorageItemId(parsedItem.itemName);
+      if (!itemId) continue;
+
+      result.categories[categoryId].items[itemId] = {
+        id: itemId,
+        name: parsedItem.itemName,
+        amount: parsedItem.amount,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      result.itemCount += 1;
+    }
+  }
+
+  return result;
+}
+
+async function findStorageMessageForRescue(client) {
+  const channel = await client.channels.fetch(CONFIG.storageChannelId).catch(() => null);
+  if (!channel || !channel.messages) return null;
+
+  const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+  if (!messages) return null;
+
+  for (const message of messages.values()) {
+    if (message.author?.id !== client.user.id) continue;
+    if (!message.embeds || message.embeds.length === 0) continue;
+
+    const found = message.embeds.find((embed) => {
+      const title = String(embed.title || "").toLowerCase();
+      const footer = String(embed.footer?.text || "").toLowerCase();
+      const fieldCount = embed.fields?.length || 0;
+
+      return (
+        fieldCount > 0 &&
+        (
+          title.includes("lager") ||
+          footer.includes("lager") ||
+          title.includes("lagerverwaltung") ||
+          title.includes("lagerzentrale")
+        )
+      );
+    });
+
+    if (found) {
+      return {
+        message,
+        embed: found,
+      };
+    }
+  }
+
+  return null;
+}
+
+async function rescueStorageFromOldPanel(client, interaction) {
+  if (!hasStorageManagePermission(interaction.member)) {
+    return safeReply(interaction, {
+      content: "❌ Du hast keine Berechtigung, das Lager zu retten.",
+      ephemeral: true,
+    });
+  }
+
+  await safeReply(interaction, {
+    content: "⏳ Ich suche das alte Lagerpanel und versuche, die sichtbaren Lagerdaten zu retten...",
+    ephemeral: true,
+  });
+
+  const found = await findStorageMessageForRescue(client);
+
+  if (!found) {
+    return interaction.followUp({
+      content: "❌ Ich konnte keine alte Lagerpanel-Nachricht im Lagerchannel finden. Bitte nichts überschreiben und prüfe, ob die alte Nachricht noch sichtbar ist.",
+      ephemeral: true,
+    });
+  }
+
+  const parsed = parseStorageFromEmbed(found.embed);
+
+  if (!parsed.categoryCount) {
+    return interaction.followUp({
+      content: "❌ Ich habe zwar ein Lagerpanel gefunden, konnte daraus aber keine Kategorien lesen.",
+      ephemeral: true,
+    });
+  }
+
+  const data = loadData();
+  const storage = ensureStorage(data);
+
+  let mergedCategories = 0;
+  let mergedItems = 0;
+
+  for (const [categoryId, rescuedCategory] of Object.entries(parsed.categories)) {
+    if (!storage.categories[categoryId]) {
+      storage.categories[categoryId] = rescuedCategory;
+      mergedCategories += 1;
+    } else {
+      storage.categories[categoryId].name = storage.categories[categoryId].name || rescuedCategory.name;
+      storage.categories[categoryId].emoji = storage.categories[categoryId].emoji || rescuedCategory.emoji;
+
+      if (!storage.categories[categoryId].items) {
+        storage.categories[categoryId].items = {};
+      }
+    }
+
+    for (const [itemId, rescuedItem] of Object.entries(rescuedCategory.items || {})) {
+      storage.categories[categoryId].items[itemId] = rescuedItem;
+      mergedItems += 1;
+    }
+
+    storage.categories[categoryId].updatedAt = Date.now();
+  }
+
+  storage.panelMessageId = found.message.id;
+
+  saveStorageLog(storage, {
+    action: "manage",
+    categoryId: "rescue",
+    categoryName: "Lagerrettung",
+    itemId: "rescue",
+    itemName: "Altes Lagerpanel aus Discord gerettet",
+    oldAmount: 0,
+    newAmount: mergedItems,
+    amount: mergedItems,
+    userId: interaction.user.id,
+    recipient: null,
+    note: `Gerettet aus Nachricht ${found.message.id}`,
+  });
+
+  data.storage = storage;
+  saveData(data);
+
+  return interaction.followUp({
+    content: [
+      "✅ Lagerrettung abgeschlossen.",
+      "",
+      `📦 Kategorien gefunden: **${parsed.categoryCount}**`,
+      `📦 Kategorien neu/zusammengeführt: **${mergedCategories}**`,
+      `📌 Gegenstände gespeichert: **${mergedItems}**`,
+      "",
+      "Wichtig: Ich habe **kein neues Lagerpanel gesendet**.",
+      "Teste jetzt einmal den Einlagern-Button. Danach kannst du bei Bedarf `/lagerpanel` nutzen.",
+    ].join("\n"),
+    ephemeral: true,
+  });
+}
+
+// =====================================================
 // LOGS
 // =====================================================
 
@@ -617,8 +880,6 @@ async function updateStoragePanel(client, options = {}) {
       };
     }
 
-    // Alte Panel-Nachricht wurde gelöscht oder ist nicht mehr auffindbar.
-    // Wichtig: Bei normalen Lageraktionen wird jetzt KEIN neues Panel gespammt.
     storage.panelMessageId = null;
     data.storage = storage;
     saveData(data);
@@ -683,10 +944,18 @@ async function sendStoragePanelCommand(client, interaction) {
 
 async function handleStorageCommand(client, interaction) {
   if (!interaction.isChatInputCommand()) return false;
-  if (interaction.commandName !== "lagerpanel") return false;
 
-  await sendStoragePanelCommand(client, interaction);
-  return true;
+  if (interaction.commandName === "lagerpanel") {
+    await sendStoragePanelCommand(client, interaction);
+    return true;
+  }
+
+  if (interaction.commandName === "lager-retten") {
+    await rescueStorageFromOldPanel(client, interaction);
+    return true;
+  }
+
+  return false;
 }
 
 async function handleStorageButton(client, interaction) {
@@ -1287,6 +1556,7 @@ async function handleStorageInteraction(client, interaction) {
 
 module.exports = {
   storagePanelCommand,
+  storageRescueCommand,
   handleStorageInteraction,
   updateStoragePanel,
 };
