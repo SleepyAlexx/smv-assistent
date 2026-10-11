@@ -4,19 +4,16 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  UserSelectMenuBuilder,
   StringSelectMenuBuilder,
+  UserSelectMenuBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
 } = require("discord.js");
 
 const CONFIG = require("../config");
-
 const { loadData, saveData } = require("../utils/dataStore");
-const { unixTimestamp } = require("../utils/dates");
-const { formatMoney, truncate, createShortId } = require("../utils/format");
-const {
-  hasLeaderPermission,
-  hasSanctionCreatorPermission,
-} = require("../utils/permissions");
+const { hasLeaderPermission } = require("../utils/permissions");
 const { sendToChannel, safeReply } = require("../utils/discord");
 
 // =====================================================
@@ -28,77 +25,375 @@ const leaderPanelCommand = new SlashCommandBuilder()
   .setDescription("Sendet das SMV-Leaderpanel.");
 
 // =====================================================
-// SANKTIONSLISTE
+// DRAFTS
 // =====================================================
 
-const SANCTIONS = [
-  { id: "p12", section: "§12", label: "Wochenabgabe nicht abgegeben", amount: 150000, special: "Wochenabgabe" },
-  { id: "p14", section: "§14", label: "Nicht im Funk sein, ohne Abmeldung", amount: 140000 },
-  { id: "p15", section: "§15", label: "Nichttragen von GPS, ohne Absprache", amount: 140000 },
-  { id: "p16", section: "§16", label: "Bei Aufstellung angemeldet aber nicht da", amount: 100000 },
-  { id: "p17", section: "§17", label: "Nichttragen der Familienkleidung (während Familienaktionen)", amount: 350000 },
-  { id: "p18", section: "§18", label: "Nichteinhaltung der Funkdisziplin", amount: 140000 },
-  { id: "p19", section: "§19", label: "Unangemessenes Verhalten in der Öffentlichkeit, das die Familie gefährdet", amount: 350000 },
-  { id: "p21", section: "§21", label: "Unangemeldete Teilnahme an Aktivitäten, die die Familie gefährden", amount: 420000 },
-  { id: "p22", section: "§22", label: "Beleidigungen jeglicher Art", amount: 150000 },
-  { id: "p23", section: "§23", label: "fehlende Grundausstattung", amount: 170000 },
-  { id: "p24", section: "§24", label: "Nach Up-Rank fragen", amount: 300000, special: "Downrank" },
-  { id: "p26", section: "§26", label: "Zinken von Familienmitgliedern", amount: 200000 },
-  { id: "p27", section: "§27", label: "Nicht reagieren auf Pflichtaufstellung", amount: 100000 },
-  { id: "p28", section: "§28", label: "Waffe nicht zurückbringen", amount: 700000 },
-  { id: "p29", section: "§29", label: "Missbrauch von Fraktionsgeldern für persönliche Zwecke", amount: 700000 },
+const sanctionDrafts = new Map();
 
-  { id: "p31", section: "§31", label: "Respektlosigkeit innerhalb der Familie oder gegenüber der Leaderschaft", amount: 350000 },
-  { id: "p32", section: "§32", label: "Nichteinhaltung von Befehlen während Missionen", amount: 280000 },
-  { id: "p33", section: "§33", label: "Streitigkeiten und Unruhe stiften innerhalb der Familie", amount: 280000 },
-  { id: "p34", section: "§34", label: "Unangemessenes Benehmen auf dem Anwesen", amount: 150000 },
-  { id: "p35", section: "§35", label: "Unnötiges Schlagen oder Überfahren von Familienmitgliedern", amount: 200000 },
-  { id: "p36", section: "§36", label: "Keine Disziplin bei Aufstellungen", amount: 300000 },
-  { id: "p37", section: "§37", label: "Respektloses Verhalten gegenüber anderen Familien/Fremden", amount: 250000 },
-  { id: "p38", section: "§38", label: "Missachtung eines Befehls der Leaderschaft", amount: 750000 },
-  { id: "p39", section: "§39", label: "Schießen auf Familienmitglieder", amount: 500000 },
-  { id: "p41", section: "§41", label: "Töten oder bewusstlos Schießen eines Familienmitglieds (grundlos)", amount: 0, special: "Bloodout" },
-  { id: "p42", section: "§42", label: "Verkauf/Preisgabe der Familie", amount: 0, special: "Bloodout" },
-  { id: "p43", section: "§43", label: "Unnötiges Schießen auf dem Anwesen", amount: 150000 },
-  { id: "p44", section: "§44", label: "Privatgespräche im Funk", amount: 100000 },
-  { id: "p45", section: "§45", label: "Alleingänge ohne Rücksprache bei Operationen", amount: 350000 },
+// =====================================================
+// SANKTIONSKATALOG
+// =====================================================
 
-  { id: "p46", section: "§46", label: "Versagen in kritischen Situationen aufgrund von Fahrlässigkeit", amount: 280000 },
-  { id: "p47", section: "§47", label: "Nichtbefolgen von Einsatzbefehlen", amount: 280000 },
-  { id: "p48", section: "§48", label: "Nichtmeldung von Feindkontakten während einer Operation", amount: 140000 },
-  { id: "p49", section: "§49", label: "Verlassen des Einsatzortes oder Fußballspiels ohne Erlaubnis", amount: 140000 },
-  { id: "p51", section: "§51", label: "Nicht reagieren im Funk auf einen Prontoruf", amount: 210000 },
-  { id: "p52", section: "§52", label: "Missbrauch des Prontorufs", amount: 700000 },
-  { id: "p53", section: "§53", label: "Einsammeln von Gefechtswaffen/Beständen ohne Rückgabe", amount: 0, special: "Bloodout" },
-  { id: "p54", section: "§54", label: "Auf den Funker nicht hören", amount: 500000 },
-  { id: "p55", section: "§55", label: "absichtliches Pitten in der Kolonne", amount: 150000 },
-  { id: "p56", section: "§56", label: "Platten schießen gegenüber Familienmitgliedern", amount: 200000 },
-  { id: "p57", section: "§57", label: "Fehlverhalten auf der Route", amount: 200000 },
-  { id: "p58", section: "§58", label: "Kolonne nicht rechtzeitig aufgestellt", amount: 150000 },
-  { id: "p59", section: "§59", label: "Sanktionen nicht rechtzeitig beglichen ohne triftigen Grund", amount: 0, special: "30% von der Sanktion" },
-  { id: "p60", section: "§60", label: "Routenwache nach Aufforderung nicht gemacht (wird von der RV ausgesprochen)", amount: 100000 },
+const SANCTION_CATEGORIES = [
+  {
+    id: "allgemein",
+    label: "Allgemeine Verstöße",
+    emoji: "💵",
+  },
+  {
+    id: "intern",
+    label: "Internes Verhalten",
+    emoji: "👑",
+  },
+  {
+    id: "aufstellung",
+    label: "Aufstellung & Anwesenheit",
+    emoji: "👥",
+  },
+  {
+    id: "extern",
+    label: "Externes Verhalten",
+    emoji: "🤝",
+  },
+  {
+    id: "kommunikation",
+    label: "Kommunikation",
+    emoji: "📻",
+  },
+  {
+    id: "hausordnung",
+    label: "Hausordnung",
+    emoji: "🏠",
+  },
 ];
 
-const SANCTION_MAP = new Map(SANCTIONS.map((sanction) => [sanction.id, sanction]));
+const SANCTION_CATALOG = [
+  // I. ALLGEMEINE VERSTÖSSE
+  {
+    id: "weitergabe_infos",
+    categoryId: "allgemein",
+    label: "Weitergabe familieninterner Informationen oder Ausrüstung",
+    amount: 200000,
+    manualAmount: true,
+    special: "bis BLOODOUT",
+  },
+  {
+    id: "wochenabgabe_nicht_bezahlt",
+    categoryId: "allgemein",
+    label: "Wochenabgabe nicht bezahlt",
+    amount: 0,
+    manualAmount: true,
+    special: "50% der Wochenabgabe + Nachzahlung",
+  },
+  {
+    id: "sanktion_nicht_bezahlt",
+    categoryId: "allgemein",
+    label: "Sanktion nicht bezahlt",
+    amount: 100000,
+    special: "Nachzahlung der Sanktion",
+  },
+  {
+    id: "kein_mindestbestand",
+    categoryId: "allgemein",
+    label: "Kein Mindestbestand",
+    amount: 50000,
+  },
+  {
+    id: "fahrzeuge_abgeschlossen",
+    categoryId: "allgemein",
+    label: "Familienfahrzeuge bei Familienaktionen oder auf Route abgeschlossen",
+    amount: 50000,
+  },
+  {
+    id: "langwaffe_verloren",
+    categoryId: "allgemein",
+    label: "Verlust einer Langwaffe durch Eigenverschulden",
+    amount: 100000,
+    special: "Wert der Waffe",
+  },
 
-const sanctionDrafts = new Map();
+  // II. INTERNES VERHALTEN
+  {
+    id: "anordnungen_ignoriert",
+    categoryId: "intern",
+    label: "Ignorieren von Anordnungen der Leaderschaft oder Hochrangigen",
+    amount: 300000,
+    manualAmount: true,
+    special: "bis BLOODOUT",
+  },
+  {
+    id: "respektlos_leaderschaft",
+    categoryId: "intern",
+    label: "Respektloses Verhalten gegenüber Leaderschaft / Höherrangigen",
+    amount: 100000,
+    manualAmount: true,
+    maxAmount: 400000,
+  },
+  {
+    id: "beleidigung_intern",
+    categoryId: "intern",
+    label: "Beleidigungen innerhalb der Familie, die zu weit gehen",
+    amount: 100000,
+    manualAmount: true,
+    maxAmount: 300000,
+  },
+  {
+    id: "nicht_aufhoeren",
+    categoryId: "intern",
+    label: "Trotz mehrfacher Aufforderung nicht aufhören",
+    amount: 50000,
+  },
+  {
+    id: "provokation_ragebaiting",
+    categoryId: "intern",
+    label: "Starke Provokation und Rage-Baiting",
+    amount: 50000,
+  },
+  {
+    id: "familie_laecherlich",
+    categoryId: "intern",
+    label: "Die Familie lächerlich dastehen lassen",
+    amount: 0,
+    manualAmount: true,
+    special: "BLOODOUT",
+  },
+  {
+    id: "schiessen_familienmitglied",
+    categoryId: "intern",
+    label: "Schießen auf Familienmitglieder",
+    amount: 500000,
+  },
+  {
+    id: "toeten_familienmitglied",
+    categoryId: "intern",
+    label: "Töten eines Familienmitglieds",
+    amount: 0,
+    manualAmount: true,
+    special: "BLOODOUT",
+  },
+
+  // III. AUFSTELLUNG & ANWESENHEIT
+  {
+    id: "nicht_abmelden",
+    categoryId: "aufstellung",
+    label: "Nicht-Abmelden bei einer Aufstellung",
+    amount: 100000,
+  },
+  {
+    id: "nicht_rechtzeitig_aufstellung",
+    categoryId: "aufstellung",
+    label: "Nicht rechtzeitig zur Aufstellung am Aufstellungsort sein",
+    amount: 50000,
+    manualAmount: true,
+    maxAmount: 150000,
+  },
+
+  // IV. EXTERNES VERHALTEN
+  {
+    id: "beleidigung_extern",
+    categoryId: "extern",
+    label: "Beleidigungen außerhalb der Familie, die zu weit gehen",
+    amount: 500000,
+    special: "Entschuldigung bei der betroffenen Familie",
+  },
+  {
+    id: "unangemessenes_benehmen",
+    categoryId: "extern",
+    label: "Unangebrachtes Benehmen bei wichtigen Meetings / Besprechungen",
+    amount: 50000,
+    manualAmount: true,
+    maxAmount: 250000,
+  },
+  {
+    id: "stress_extern",
+    categoryId: "extern",
+    label: "Stress außerhalb der Familie provozieren",
+    amount: 100000,
+    manualAmount: true,
+    special: "bis BLOODOUT",
+  },
+  {
+    id: "zivi_action",
+    categoryId: "extern",
+    label: "Zivi-Action fällt auf die Familie zurück",
+    amount: 100000,
+    manualAmount: true,
+    special: "bis BLOODOUT",
+  },
+
+  // V. KOMMUNIKATION
+  {
+    id: "funkpflicht_missachtet",
+    categoryId: "kommunikation",
+    label: "Funkpflicht missachtet",
+    amount: 50000,
+  },
+  {
+    id: "funkdisziplin_missachtet",
+    categoryId: "kommunikation",
+    label: "Funkdisziplin missachtet",
+    amount: 50000,
+    manualAmount: true,
+    maxAmount: 150000,
+  },
+  {
+    id: "kein_gps_tracker",
+    categoryId: "kommunikation",
+    label: "Keinen GPS-Tracker bei sich tragen",
+    amount: 100000,
+  },
+
+  // VI. HAUSORDNUNG
+  {
+    id: "tueren_tore_nicht_abgeschlossen",
+    categoryId: "hausordnung",
+    label: "Nicht abschließen der Türen / Tore",
+    amount: 50000,
+  },
+  {
+    id: "zu_schnell_anwesen",
+    categoryId: "hausordnung",
+    label: "Zu schnelles Fahren im Anwesen (> 100)",
+    amount: 50000,
+  },
+];
 
 // =====================================================
 // HELPER
 // =====================================================
 
-function getStatusLabel(record) {
-  if (record.cancelled) return "STORNIERT";
-  if (record.paid) return "BEZAHLT";
-  if (Date.now() >= record.dueAt) return "ÜBERFÄLLIG";
-  return "OFFEN";
+function formatMoney(amount) {
+  return `${Number(amount || 0).toLocaleString("de-DE")}$`;
 }
 
-function getStatusEmoji(record) {
-  if (record.cancelled) return "❌";
-  if (record.paid) return "✅";
-  if (Date.now() >= record.dueAt) return "🚨";
-  return "⏳";
+function parseMoney(input) {
+  const cleaned = String(input || "")
+    .replace(/\./g, "")
+    .replace(/,/g, "")
+    .replace(/\$/g, "")
+    .replace(/[^\d]/g, "");
+
+  const amount = Number(cleaned);
+
+  if (!Number.isInteger(amount) || amount < 0) return null;
+  return amount;
+}
+
+function createShortSanctionId() {
+  return `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+function getUnixTimestamp(ms) {
+  return Math.floor(Number(ms || Date.now()) / 1000);
+}
+
+function getDueAt() {
+  const days = Number(CONFIG.sanctionDueDays || 7);
+  return Date.now() + days * 24 * 60 * 60 * 1000;
+}
+
+function getCatalogItem(itemId) {
+  return SANCTION_CATALOG.find((item) => item.id === itemId) || null;
+}
+
+function getCategory(categoryId) {
+  return SANCTION_CATEGORIES.find((category) => category.id === categoryId) || null;
+}
+
+function getCatalogItemsByCategory(categoryId) {
+  return SANCTION_CATALOG.filter((item) => item.categoryId === categoryId);
+}
+
+function getAmountText(item) {
+  if (!item) return "—";
+
+  if (item.special === "BLOODOUT" && !item.amount) {
+    return "BLOODOUT";
+  }
+
+  if (item.maxAmount) {
+    return `${formatMoney(item.amount)} - ${formatMoney(item.maxAmount)}`;
+  }
+
+  if (item.special) {
+    if (item.amount) return `${formatMoney(item.amount)} + ${item.special}`;
+    return item.special;
+  }
+
+  return formatMoney(item.amount);
+}
+
+function getMemberDisplayName(member, user) {
+  return member?.displayName || user?.globalName || user?.username || "Unbekannt";
+}
+
+function hasAnyRole(member, roleIds = []) {
+  if (!member || !member.roles || !member.roles.cache) return false;
+  return roleIds.some((roleId) => member.roles.cache.has(roleId));
+}
+
+function hasSanctionPermission(member) {
+  return (
+    hasLeaderPermission(member) ||
+    hasAnyRole(member, CONFIG.sanctionCreatorRoleIds || [])
+  );
+}
+
+function cleanText(input, fallback = "—") {
+  const value = String(input || "").trim();
+  if (!value) return fallback;
+  return value.slice(0, 500);
+}
+
+function getDraft(userId) {
+  return sanctionDrafts.get(userId) || null;
+}
+
+function createNewDraft(userId) {
+  const draft = {
+    creatorId: userId,
+    targetId: null,
+    targetName: null,
+    items: [],
+    createdAt: Date.now(),
+  };
+
+  sanctionDrafts.set(userId, draft);
+  return draft;
+}
+
+function getDraftTotal(draft) {
+  return (draft?.items || []).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+}
+
+function formatDraftItems(items = []) {
+  if (!items.length) return "┖ Noch keine Sanktion ausgewählt";
+
+  return items
+    .map((item, index) => {
+      const isLast = index === items.length - 1;
+      const prefix = isLast ? "┖" : "┃";
+
+      const specialText = item.special ? ` + ${item.special}` : "";
+      return `${prefix} ${item.reason} — ${formatMoney(item.amount)}${specialText}`;
+    })
+    .join("\n")
+    .slice(0, 1000);
+}
+
+function formatFinalSanctionItems(items = []) {
+  if (!items.length) return "—";
+
+  return items
+    .map((item, index) => {
+      const isLast = index === items.length - 1;
+      const prefix = isLast ? "┖" : "┃";
+
+      const specialText = item.special ? ` + ${item.special}` : "";
+      return `${prefix} ${item.reason} — ${formatMoney(item.amount)}${specialText}`;
+    })
+    .join("\n")
+    .slice(0, 1000);
 }
 
 // =====================================================
@@ -145,9 +440,9 @@ async function sendLeaderPanel(client, interaction) {
     });
   }
 
-  const leaderPanelChannelId = CONFIG.leaderPanelChannelId || CONFIG.sanctionChannelId;
+  const channelId = CONFIG.leaderPanelChannelId || CONFIG.sanctionChannelId;
 
-  const message = await sendToChannel(client, leaderPanelChannelId, {
+  const message = await sendToChannel(client, channelId, {
     embeds: [createLeaderPanelEmbed()],
     components: [createLeaderPanelButtons()],
   });
@@ -160,586 +455,348 @@ async function sendLeaderPanel(client, interaction) {
   }
 
   return safeReply(interaction, {
-    content: `✅ Leaderpanel wurde in <#${leaderPanelChannelId}> gesendet.`,
+    content: `✅ Leaderpanel wurde in <#${channelId}> gesendet.`,
     ephemeral: true,
   });
 }
 
 // =====================================================
-// DRAFT / AUSWAHL
+// DRAFT UI
 // =====================================================
 
-function createSanctionDraft(leaderId) {
-  const draft = {
-    leaderId,
-    targetUserId: null,
-    selectedByMenu: {
-      group1: [],
-      group2: [],
-      group3: [],
-    },
-    createdAt: Date.now(),
-  };
-
-  sanctionDrafts.set(leaderId, draft);
-  return draft;
-}
-
-function getSanctionDraft(leaderId) {
-  return sanctionDrafts.get(leaderId) || createSanctionDraft(leaderId);
-}
-
-function getDraftSelectedIds(draft) {
-  return [
-    ...(draft.selectedByMenu.group1 || []),
-    ...(draft.selectedByMenu.group2 || []),
-    ...(draft.selectedByMenu.group3 || []),
-  ].filter((value, index, array) => array.indexOf(value) === index);
-}
-
-function createSanctionOptions(startSection, endSection) {
-  return SANCTIONS
-    .filter((sanction) => {
-      const number = Number(sanction.section.replace("§", ""));
-      return number >= startSection && number <= endSection;
-    })
-    .map((sanction) => ({
-      label: truncate(`${sanction.section} ${sanction.label}`, 100),
-      description: truncate(
-        sanction.special
-          ? `${sanction.special}${sanction.amount ? ` + ${formatMoney(sanction.amount)}` : ""}`
-          : formatMoney(sanction.amount),
-        100
-      ),
-      value: sanction.id,
-    }));
-}
-
-function createSanctionBuilderComponents(leaderId) {
-  const draft = getSanctionDraft(leaderId);
-
-  const rowUser = new ActionRowBuilder().addComponents(
+function createTargetSelectRow() {
+  return new ActionRowBuilder().addComponents(
     new UserSelectMenuBuilder()
-      .setCustomId("sanction_user_select")
-      .setPlaceholder("Betroffene Person auswählen")
+      .setCustomId("sanction_target_select")
+      .setPlaceholder("Person auswählen")
       .setMinValues(1)
       .setMaxValues(1)
   );
-
-  const group1Options = createSanctionOptions(12, 29);
-  const group2Options = createSanctionOptions(31, 45);
-  const group3Options = createSanctionOptions(46, 60);
-
-  const rowGroup1 = new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId("sanction_select_group1")
-      .setPlaceholder("Regelkatalog auswählen: §12 - §29")
-      .setMinValues(0)
-      .setMaxValues(group1Options.length)
-      .addOptions(group1Options)
-  );
-
-  const rowGroup2 = new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId("sanction_select_group2")
-      .setPlaceholder("Regelkatalog auswählen: §31 - §45")
-      .setMinValues(0)
-      .setMaxValues(group2Options.length)
-      .addOptions(group2Options)
-  );
-
-  const rowGroup3 = new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId("sanction_select_group3")
-      .setPlaceholder("Regelkatalog auswählen: §46 - §60")
-      .setMinValues(0)
-      .setMaxValues(group3Options.length)
-      .addOptions(group3Options)
-  );
-
-  const selectedCount = getDraftSelectedIds(draft).length;
-
-  const rowButtons = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("sanction_submit")
-      .setLabel(`Ausstellen (${selectedCount})`)
-      .setEmoji("⚠️")
-      .setStyle(ButtonStyle.Danger),
-
-    new ButtonBuilder()
-      .setCustomId("sanction_clear")
-      .setLabel("Zurücksetzen")
-      .setEmoji("🧹")
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  return [rowUser, rowGroup1, rowGroup2, rowGroup3, rowButtons];
 }
 
-function createSanctionDraftText(leaderId) {
-  const draft = getSanctionDraft(leaderId);
-  const selectedIds = getDraftSelectedIds(draft);
-  const selectedSanctions = selectedIds.map((id) => SANCTION_MAP.get(id)).filter(Boolean);
-
-  const targetText = draft.targetUserId ? `<@${draft.targetUserId}>` : "Noch keine Person ausgewählt";
-
-  const total = selectedSanctions.reduce((sum, sanction) => sum + (Number(sanction.amount) || 0), 0);
-
-  const sanctionsText = selectedSanctions.length
-    ? selectedSanctions
-        .map((sanction, index) => {
-          const isLast = index === selectedSanctions.length - 1;
-          const punishment = sanction.special && sanction.amount
-            ? `${sanction.special} + ${formatMoney(sanction.amount)}`
-            : sanction.special
-              ? sanction.special
-              : formatMoney(sanction.amount);
-
-          return `${isLast ? "┖" : "┃"} **${sanction.section}** ${sanction.label}\n${isLast ? " " : "┃"} └ ${punishment}`;
-        })
-        .join("\n")
-    : "┖ Noch keine Sanktion ausgewählt";
-
-  return [
-    "⚠️ **SMV SANKTIONSERSTELLUNG**",
-    "━━━━━━━━━━━━━━━━━━━━",
-    "",
-    "👤 **BETROFFENE PERSON**",
-    `┖ ${targetText}`,
-    "",
-    "📋 **AUSGEWÄHLTE SANKTIONEN**",
-    sanctionsText,
-    "",
-    "💰 **BERECHNUNG**",
-    `┃ Anzahl: **${selectedSanctions.length}**`,
-    `┖ Summe: **${total > 0 ? formatMoney(total) : "Keine feste Geldsumme"}**`,
-    "",
-    "━━━━━━━━━━━━━━━━━━━━",
-    "Wähle zuerst die Person und danach eine oder mehrere Sanktionen aus.",
-  ].join("\n");
-}
-
-// =====================================================
-// SANKTION ERSTELLEN
-// =====================================================
-
-function calculateSanctionTotals(selectedSanctions) {
-  const total = selectedSanctions.reduce((sum, sanction) => sum + (Number(sanction.amount) || 0), 0);
-
-  const specials = selectedSanctions
-    .filter((sanction) => sanction.special)
-    .map((sanction) => `${sanction.section}: ${sanction.special}`);
-
-  return {
-    total,
-    specials,
-  };
-}
-
-function formatSanctionList(selectedSanctions) {
-  return selectedSanctions
-    .map((sanction, index) => {
-      const punishment =
-        sanction.special && sanction.amount
-          ? `${sanction.special} + ${formatMoney(sanction.amount)}`
-          : sanction.special
-            ? sanction.special
-            : formatMoney(sanction.amount);
-
-      const isLast = index === selectedSanctions.length - 1;
-
-      return [
-        `${isLast ? "┖" : "┃"} **${sanction.section}** ${sanction.label}`,
-        `${isLast ? " " : "┃"} └ ${punishment}`,
-      ].join("\n");
-    })
-    .join("\n")
-    .slice(0, 3900);
-}
-
-function createSanctionRecord({ targetUserId, leaderId, selectedSanctions, guildId }) {
-  const createdAt = Date.now();
-  const dueAt = createdAt + CONFIG.sanctionDueDays * 24 * 60 * 60 * 1000;
-  const { total, specials } = calculateSanctionTotals(selectedSanctions);
-
-  return {
-    id: createShortId(),
-    guildId,
-    targetUserId,
-    leaderId,
-    sanctionIds: selectedSanctions.map((sanction) => sanction.id),
-    total,
-    specials,
-    createdAt,
-    dueAt,
-    paid: false,
-    paidAt: null,
-    paidBy: null,
-    cancelled: false,
-    cancelledAt: null,
-    cancelledBy: null,
-    warnedOverdue: false,
-    messageId: null,
-  };
-}
-
-function createSanctionEmbed(record) {
-  const selectedSanctions = record.sanctionIds
-    .map((id) => SANCTION_MAP.get(id))
-    .filter(Boolean);
-
-  const dueUnix = unixTimestamp(record.dueAt);
-  const createdUnix = unixTimestamp(record.createdAt);
-
-  const moneyText = record.total > 0 ? formatMoney(record.total) : "Keine feste Geldsumme";
-
-  const specialText = record.specials && record.specials.length > 0
-    ? record.specials.map((special, index) => {
-        const isLast = index === record.specials.length - 1;
-        return `${isLast ? "┖" : "┃"} ${special}`;
-      }).join("\n")
-    : "┖ Keine";
-
-  const statusLabel = getStatusLabel(record);
-  const statusEmoji = getStatusEmoji(record);
-
-  const statusText = record.cancelled
-    ? `❌ Storniert von <@${record.cancelledBy}> am <t:${unixTimestamp(record.cancelledAt)}:F>`
-    : record.paid
-      ? `✅ Bezahlt von <@${record.paidBy}> am <t:${unixTimestamp(record.paidAt)}:F>`
-      : Date.now() >= record.dueAt
-        ? "🚨 Überfällig"
-        : "⏳ Offen";
-
-  const embedColor = record.cancelled
-    ? CONFIG.dangerColor
-    : record.paid
-      ? CONFIG.successColor
-      : Date.now() >= record.dueAt
-        ? CONFIG.dangerColor
-        : CONFIG.warningColor;
-
+function createDraftEmbed(draft) {
   return new EmbedBuilder()
-    .setColor(embedColor)
-    .setTitle(`${statusEmoji} • SMV SANKTION`)
+    .setColor(CONFIG.warningColor)
+    .setTitle("⚠️ • SANKTION ERSTELLEN")
     .setDescription(
       [
         "━━━━━━━━━━━━━━━━━━━━",
-        `👤 **Betroffene Person:** <@${record.targetUserId}>`,
-        `👑 **Ausgestellt von:** <@${record.leaderId}>`,
-        `📌 **Status:** **${statusLabel}**`,
-        `🆔 **Sanktion-ID:** \`${record.id}\``,
+        `Betroffene Person: ${draft.targetId ? `<@${draft.targetId}>` : "Noch nicht ausgewählt"}`,
+        "",
+        "**Ausgewählte Vergehen:**",
+        formatDraftItems(draft.items),
+        "",
+        `**Gesamtbetrag:** ${formatMoney(getDraftTotal(draft))}`,
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
     )
-    .addFields(
-      {
-        name: "📋 REGELVERSTÖSSE",
-        value: formatSanctionList(selectedSanctions) || "┖ Keine Sanktion gefunden",
-        inline: false,
-      },
-      {
-        name: "💰 ZU BEZAHLEN",
-        value: `┖ **${moneyText}**`,
-        inline: true,
-      },
-      {
-        name: "⚖️ SONDERSTRAFE",
-        value: specialText,
-        inline: true,
-      },
-      {
-        name: "⏳ ZEITRAUM",
-        value: [
-          `┃ Erstellt: <t:${createdUnix}:F>`,
-          `┃ Frist: <t:${dueUnix}:F>`,
-          `┖ Restzeit: <t:${dueUnix}:R>`,
-        ].join("\n"),
-        inline: false,
-      },
-      {
-        name: "📌 STATUSDETAIL",
-        value: `┖ ${statusText}`,
-        inline: false,
-      }
-    )
     .setFooter({
-      text: `${CONFIG.shortName} • Sanktion-ID: ${record.id}`,
+      text: `${CONFIG.shortName} • Sanktionsentwurf`,
     });
 }
 
-function createSanctionButtons(record) {
-  const isClosed = Boolean(record.paid || record.cancelled);
+function createDraftButtons(draft) {
+  const hasTarget = Boolean(draft.targetId);
+  const hasItems = draft.items.length > 0;
 
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("sanction_add_catalog")
+        .setLabel("Aus Katalog")
+        .setEmoji("📚")
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(!hasTarget),
+
+      new ButtonBuilder()
+        .setCustomId("sanction_add_custom")
+        .setLabel("Freier Grund")
+        .setEmoji("✍️")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!hasTarget),
+
+      new ButtonBuilder()
+        .setCustomId("sanction_finish")
+        .setLabel("Sanktion posten")
+        .setEmoji("✅")
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(!hasTarget || !hasItems),
+
+      new ButtonBuilder()
+        .setCustomId("sanction_abort")
+        .setLabel("Abbrechen")
+        .setEmoji("❌")
+        .setStyle(ButtonStyle.Danger)
+    ),
+  ];
+}
+
+function createCategorySelectRow() {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`sanction_paid_${record.id}`)
-      .setLabel(record.paid ? "Bereits bezahlt" : "Bezahlt markieren")
-      .setEmoji("✅")
-      .setStyle(ButtonStyle.Success)
-      .setDisabled(isClosed),
-
-    new ButtonBuilder()
-      .setCustomId(`sanction_cancel_${record.id}`)
-      .setLabel(record.cancelled ? "Storniert" : "Stornieren")
-      .setEmoji("❌")
-      .setStyle(ButtonStyle.Danger)
-      .setDisabled(isClosed)
+    new StringSelectMenuBuilder()
+      .setCustomId("sanction_category_select")
+      .setPlaceholder("Kategorie auswählen")
+      .setMinValues(1)
+      .setMaxValues(1)
+      .addOptions(
+        SANCTION_CATEGORIES.map((category) => ({
+          label: category.label,
+          value: category.id,
+          emoji: category.emoji,
+        }))
+      )
   );
 }
 
-async function updateSanctionMessage(client, record) {
-  if (!record.messageId) return;
+function createOffenseSelectRow(categoryId) {
+  const items = getCatalogItemsByCategory(categoryId).slice(0, 25);
+  const category = getCategory(categoryId);
 
-  const channel = await client.channels.fetch(CONFIG.sanctionChannelId).catch(() => null);
-  if (!channel || !channel.messages) return;
-
-  const message = await channel.messages.fetch(record.messageId).catch(() => null);
-  if (!message) return;
-
-  await message.edit({
-    embeds: [createSanctionEmbed(record)],
-    components: [createSanctionButtons(record)],
-  }).catch(() => null);
+  return new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`sanction_offense_select_${categoryId}`)
+      .setPlaceholder(`${category?.label || "Vergehen"} auswählen`)
+      .setMinValues(1)
+      .setMaxValues(1)
+      .addOptions(
+        items.map((item) => ({
+          label: item.label.slice(0, 100),
+          value: item.id,
+          description: getAmountText(item).slice(0, 100),
+        }))
+      )
+  );
 }
 
-async function createAndPostSanction(client, interaction, draft) {
-  const selectedIds = getDraftSelectedIds(draft);
-  const selectedSanctions = selectedIds.map((id) => SANCTION_MAP.get(id)).filter(Boolean);
+function createCustomSanctionModal() {
+  const modal = new ModalBuilder()
+    .setCustomId("sanction_custom_modal")
+    .setTitle("✍️ Freien Grund hinzufügen");
 
-  if (!draft.targetUserId) {
-    return safeReply(interaction, {
-      content: "❌ Bitte wähle zuerst einen User aus.",
-      ephemeral: true,
-    });
+  const reasonInput = new TextInputBuilder()
+    .setCustomId("sanction_reason")
+    .setLabel("Grund / Vergehen")
+    .setPlaceholder("z. B. Respektloses Verhalten")
+    .setStyle(TextInputStyle.Short)
+    .setMinLength(2)
+    .setMaxLength(100)
+    .setRequired(true);
+
+  const amountInput = new TextInputBuilder()
+    .setCustomId("sanction_amount")
+    .setLabel("Betrag")
+    .setPlaceholder("z. B. 75000")
+    .setStyle(TextInputStyle.Short)
+    .setMinLength(1)
+    .setMaxLength(15)
+    .setRequired(true);
+
+  const noteInput = new TextInputBuilder()
+    .setCustomId("sanction_special")
+    .setLabel("Zusatz / Sonderstrafe optional")
+    .setPlaceholder("z. B. BLOODOUT oder leer lassen")
+    .setStyle(TextInputStyle.Short)
+    .setMaxLength(100)
+    .setRequired(false);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(reasonInput),
+    new ActionRowBuilder().addComponents(amountInput),
+    new ActionRowBuilder().addComponents(noteInput)
+  );
+
+  return modal;
+}
+
+function createManualAmountModal(item) {
+  const modal = new ModalBuilder()
+    .setCustomId(`sanction_amount_modal_${item.id}`)
+    .setTitle("💵 Betrag festlegen");
+
+  const amountInput = new TextInputBuilder()
+    .setCustomId("sanction_amount")
+    .setLabel("Endgültiger Betrag")
+    .setPlaceholder(`z. B. ${item.amount || 100000}`)
+    .setStyle(TextInputStyle.Short)
+    .setMinLength(1)
+    .setMaxLength(15)
+    .setRequired(true);
+
+  const specialInput = new TextInputBuilder()
+    .setCustomId("sanction_special")
+    .setLabel("Zusatz / Sonderstrafe optional")
+    .setPlaceholder(item.special || "z. B. BLOODOUT oder leer lassen")
+    .setStyle(TextInputStyle.Short)
+    .setMaxLength(100)
+    .setRequired(false);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(amountInput),
+    new ActionRowBuilder().addComponents(specialInput)
+  );
+
+  return modal;
+}
+
+// =====================================================
+// SANKTION EMBED
+// =====================================================
+
+function getSanctionStatusText(sanction) {
+  if (sanction.status === "paid") return "Bezahlt";
+  if (sanction.status === "cancelled") return "Storniert";
+  if (sanction.status === "overdue") return "Überfällig";
+  return "Offen";
+}
+
+function getSanctionStatusEmoji(sanction) {
+  if (sanction.status === "paid") return "✅";
+  if (sanction.status === "cancelled") return "❌";
+  if (sanction.status === "overdue") return "⏰";
+  return "⚠️";
+}
+
+function createSanctionEmbed(sanction) {
+  const statusText = getSanctionStatusText(sanction);
+  const statusEmoji = getSanctionStatusEmoji(sanction);
+
+  const color =
+    sanction.status === "paid"
+      ? CONFIG.successColor
+      : sanction.status === "cancelled"
+        ? CONFIG.dangerColor
+        : sanction.status === "overdue"
+          ? CONFIG.warningColor
+          : CONFIG.embedColor;
+
+  const lines = [
+    "━━━━━━━━━━━━━━━━━━━━",
+    `Betroffene Person: <@${sanction.targetId}>`,
+    `Ausgestellt von: <@${sanction.creatorId}>`,
+    `Status: ${statusEmoji} **${statusText}**`,
+    "",
+    "**Vergehen:**",
+    formatFinalSanctionItems(sanction.items),
+    "",
+    `**Gesamtbetrag:** ${formatMoney(sanction.totalAmount)}`,
+    `**Frist:** <t:${getUnixTimestamp(sanction.dueAt)}:R>`,
+    "━━━━━━━━━━━━━━━━━━━━",
+  ];
+
+  if (sanction.status === "paid") {
+    lines.push("");
+    lines.push(`✅ **Bezahlt von:** <@${sanction.paidBy}>`);
+    lines.push(`🕘 **Bezahlt am:** <t:${getUnixTimestamp(sanction.paidAt)}:F>`);
   }
 
-  if (selectedSanctions.length === 0) {
-    return safeReply(interaction, {
-      content: "❌ Bitte wähle mindestens eine Sanktion aus.",
-      ephemeral: true,
-    });
+  if (sanction.status === "cancelled") {
+    lines.push("");
+    lines.push(`❌ **Storniert von:** <@${sanction.cancelledBy}>`);
+    lines.push(`🕘 **Storniert am:** <t:${getUnixTimestamp(sanction.cancelledAt)}:F>`);
   }
 
-  const record = createSanctionRecord({
-    targetUserId: draft.targetUserId,
-    leaderId: interaction.user.id,
-    selectedSanctions,
-    guildId: interaction.guildId,
-  });
+  return new EmbedBuilder()
+    .setColor(color)
+    .setTitle(`${statusEmoji} • SMV SANKTION`)
+    .setDescription(lines.join("\n"))
+    .setFooter({
+      text: `${CONFIG.shortName} • Sanktions-ID: ${sanction.id}`,
+    });
+}
+
+function createSanctionButtons(sanction) {
+  const isDone = sanction.status === "paid" || sanction.status === "cancelled";
+
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`sanction_paid_${sanction.id}`)
+      .setLabel("Bezahlt")
+      .setEmoji("✅")
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(isDone),
+
+    new ButtonBuilder()
+      .setCustomId(`sanction_cancel_${sanction.id}`)
+      .setLabel("Stornieren")
+      .setEmoji("❌")
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(isDone)
+  );
+}
+
+// =====================================================
+// SANKTION POSTEN / UPDATEN
+// =====================================================
+
+async function postSanction(client, interaction, draft) {
+  const sanction = {
+    id: createShortSanctionId(),
+    targetId: draft.targetId,
+    targetName: draft.targetName,
+    creatorId: draft.creatorId,
+    items: draft.items,
+    totalAmount: getDraftTotal(draft),
+    status: "open",
+    createdAt: Date.now(),
+    dueAt: getDueAt(),
+    messageId: null,
+    paidBy: null,
+    paidAt: null,
+    cancelledBy: null,
+    cancelledAt: null,
+    overdueNotified: false,
+  };
 
   const message = await sendToChannel(client, CONFIG.sanctionChannelId, {
-    embeds: [createSanctionEmbed(record)],
-    components: [createSanctionButtons(record)],
+    content: `<@${sanction.targetId}>`,
+    embeds: [createSanctionEmbed(sanction)],
+    components: [createSanctionButtons(sanction)],
+    allowedMentions: {
+      users: [sanction.targetId],
+    },
   });
 
   if (!message) {
     return safeReply(interaction, {
-      content: "❌ Der Sanktionschannel wurde nicht gefunden.",
+      content: "❌ Sanktion konnte nicht gesendet werden. Bitte prüfe Channel-ID und Bot-Rechte.",
       ephemeral: true,
     });
   }
 
-  record.messageId = message.id;
+  sanction.messageId = message.id;
 
   const data = loadData();
   if (!data.sanctions) data.sanctions = {};
-  data.sanctions[record.id] = record;
+  data.sanctions[sanction.id] = sanction;
   saveData(data);
 
   sanctionDrafts.delete(interaction.user.id);
 
-  await sendToChannel(client, CONFIG.sanctionLogChannelId, {
-    embeds: [
-      new EmbedBuilder()
-        .setColor(CONFIG.warningColor)
-        .setTitle("⚠️ • NEUE SANKTION ERSTELLT")
-        .setDescription(
-          [
-            "━━━━━━━━━━━━━━━━━━━━",
-            `👤 **Name:** <@${record.targetUserId}>`,
-            `💰 **Zu bezahlen:** ${record.total > 0 ? `**${formatMoney(record.total)}**` : "**Keine feste Geldsumme**"}`,
-            `⏳ **Frist:** <t:${unixTimestamp(record.dueAt)}:F>`,
-            `📌 **Restzeit:** <t:${unixTimestamp(record.dueAt)}:R>`,
-            `👑 **Ausgestellt von:** <@${record.leaderId}>`,
-            `🆔 **Sanktion-ID:** \`${record.id}\``,
-            "━━━━━━━━━━━━━━━━━━━━",
-          ].join("\n")
-        )
-        .setFooter({ text: `${CONFIG.shortName} • Sanktionslog` }),
-    ],
-  });
-
   return safeReply(interaction, {
-    content: `✅ Sanktion wurde erfolgreich in <#${CONFIG.sanctionChannelId}> erstellt.`,
+    content: `✅ Sanktion wurde in <#${CONFIG.sanctionChannelId}> erstellt.\n💵 Gesamtbetrag: **${formatMoney(sanction.totalAmount)}**`,
     ephemeral: true,
   });
 }
 
-// =====================================================
-// BEZAHLT / STORNIERT
-// =====================================================
+async function updateSanctionMessage(client, sanction) {
+  if (!sanction.messageId) return null;
 
-async function markSanctionPaid(client, interaction, sanctionId) {
-  if (!hasLeaderPermission(interaction.member)) {
-    return safeReply(interaction, {
-      content: "❌ Nur die Leaderschaft darf Sanktionen als bezahlt markieren.",
-      ephemeral: true,
-    });
-  }
+  const channel = await client.channels.fetch(CONFIG.sanctionChannelId).catch(() => null);
+  if (!channel || !channel.messages) return null;
 
-  const data = loadData();
-  const record = data.sanctions?.[sanctionId];
+  const message = await channel.messages.fetch(sanction.messageId).catch(() => null);
+  if (!message) return null;
 
-  if (!record) {
-    return safeReply(interaction, {
-      content: "❌ Diese Sanktion wurde nicht im Speicher gefunden.",
-      ephemeral: true,
-    });
-  }
+  await message.edit({
+    embeds: [createSanctionEmbed(sanction)],
+    components: [createSanctionButtons(sanction)],
+  }).catch(() => null);
 
-  if (record.paid || record.cancelled) {
-    return safeReply(interaction, {
-      content: "ℹ️ Diese Sanktion ist bereits abgeschlossen.",
-      ephemeral: true,
-    });
-  }
-
-  record.paid = true;
-  record.paidAt = Date.now();
-  record.paidBy = interaction.user.id;
-
-  data.sanctions[sanctionId] = record;
-  saveData(data);
-
-  await updateSanctionMessage(client, record);
-
-  await sendToChannel(client, CONFIG.sanctionLogChannelId, {
-    embeds: [
-      new EmbedBuilder()
-        .setColor(CONFIG.successColor)
-        .setTitle("✅ • SANKTION BEZAHLT")
-        .setDescription(
-          [
-            "━━━━━━━━━━━━━━━━━━━━",
-            `👤 **Name:** <@${record.targetUserId}>`,
-            `✅ **Bezahlt markiert von:** <@${interaction.user.id}>`,
-            `🆔 **Sanktion-ID:** \`${record.id}\``,
-            "━━━━━━━━━━━━━━━━━━━━",
-          ].join("\n")
-        ),
-    ],
-  });
-
-  return safeReply(interaction, {
-    content: "✅ Sanktion wurde als bezahlt markiert.",
-    ephemeral: true,
-  });
-}
-
-async function cancelSanction(client, interaction, sanctionId) {
-  if (!hasLeaderPermission(interaction.member)) {
-    return safeReply(interaction, {
-      content: "❌ Nur die Leaderschaft darf Sanktionen stornieren.",
-      ephemeral: true,
-    });
-  }
-
-  const data = loadData();
-  const record = data.sanctions?.[sanctionId];
-
-  if (!record) {
-    return safeReply(interaction, {
-      content: "❌ Diese Sanktion wurde nicht im Speicher gefunden.",
-      ephemeral: true,
-    });
-  }
-
-  if (record.paid || record.cancelled) {
-    return safeReply(interaction, {
-      content: "ℹ️ Diese Sanktion ist bereits abgeschlossen.",
-      ephemeral: true,
-    });
-  }
-
-  record.cancelled = true;
-  record.cancelledAt = Date.now();
-  record.cancelledBy = interaction.user.id;
-
-  data.sanctions[sanctionId] = record;
-  saveData(data);
-
-  await updateSanctionMessage(client, record);
-
-  await sendToChannel(client, CONFIG.sanctionLogChannelId, {
-    embeds: [
-      new EmbedBuilder()
-        .setColor(CONFIG.dangerColor)
-        .setTitle("❌ • SANKTION STORNIERT")
-        .setDescription(
-          [
-            "━━━━━━━━━━━━━━━━━━━━",
-            `👤 **Name:** <@${record.targetUserId}>`,
-            `❌ **Storniert von:** <@${interaction.user.id}>`,
-            `🆔 **Sanktion-ID:** \`${record.id}\``,
-            "━━━━━━━━━━━━━━━━━━━━",
-          ].join("\n")
-        ),
-    ],
-  });
-
-  return safeReply(interaction, {
-    content: "✅ Sanktion wurde storniert.",
-    ephemeral: true,
-  });
+  return message;
 }
 
 // =====================================================
-// ÜBERFÄLLIGE SANKTIONEN
-// =====================================================
-
-async function checkOverdueSanctions(client) {
-  const data = loadData();
-  let changed = false;
-
-  for (const record of Object.values(data.sanctions || {})) {
-    if (record.paid) continue;
-    if (record.cancelled) continue;
-    if (record.warnedOverdue) continue;
-    if (Date.now() < record.dueAt) continue;
-
-    record.warnedOverdue = true;
-    changed = true;
-
-    await sendToChannel(client, CONFIG.sanctionLogChannelId, {
-      embeds: [
-        new EmbedBuilder()
-          .setColor(CONFIG.dangerColor)
-          .setTitle("🚨 • SANKTION ÜBERFÄLLIG")
-          .setDescription(
-            [
-              "━━━━━━━━━━━━━━━━━━━━",
-              `👤 **Name:** <@${record.targetUserId}>`,
-              `💰 **Zu bezahlen:** ${record.total > 0 ? `**${formatMoney(record.total)}**` : "**Keine feste Geldsumme**"}`,
-              `⏳ **Frist war:** <t:${unixTimestamp(record.dueAt)}:F>`,
-              `🚨 **Überfällig seit:** <t:${unixTimestamp(record.dueAt)}:R>`,
-              `👑 **Ausgestellt von:** <@${record.leaderId}>`,
-              `🆔 **Sanktion-ID:** \`${record.id}\``,
-              "━━━━━━━━━━━━━━━━━━━━",
-            ].join("\n")
-          )
-          .setFooter({ text: `${CONFIG.shortName} • Sanktionslog` }),
-      ],
-    });
-
-    await updateSanctionMessage(client, record).catch(() => null);
-  }
-
-  if (changed) saveData(data);
-}
-
-// =====================================================
-// INTERACTIONS
+// COMMANDS
 // =====================================================
 
 async function handleLeaderPanelCommand(client, interaction) {
@@ -750,11 +807,247 @@ async function handleLeaderPanelCommand(client, interaction) {
   return true;
 }
 
-async function handleSanctionButtons(client, interaction) {
+// =====================================================
+// INTERACTIONS: DRAFT
+// =====================================================
+
+async function handleCreateSanctionButton(client, interaction) {
+  if (!interaction.isButton()) return false;
+  if (interaction.customId !== "leader_create_sanction") return false;
+
+  if (!hasSanctionPermission(interaction.member)) {
+    await safeReply(interaction, {
+      content: "❌ Du hast keine Berechtigung, Sanktionen zu erstellen.",
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  const draft = createNewDraft(interaction.user.id);
+
+  await safeReply(interaction, {
+    embeds: [createDraftEmbed(draft)],
+    components: [createTargetSelectRow()],
+    ephemeral: true,
+  });
+
+  return true;
+}
+
+async function handleTargetSelect(client, interaction) {
+  if (!interaction.isUserSelectMenu()) return false;
+  if (interaction.customId !== "sanction_target_select") return false;
+
+  if (!hasSanctionPermission(interaction.member)) {
+    await safeReply(interaction, {
+      content: "❌ Du hast keine Berechtigung, Sanktionen zu erstellen.",
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  const draft = getDraft(interaction.user.id) || createNewDraft(interaction.user.id);
+  const targetId = interaction.values?.[0];
+
+  if (!targetId) {
+    await safeReply(interaction, {
+      content: "❌ Keine Person ausgewählt.",
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  const member = await interaction.guild.members.fetch(targetId).catch(() => null);
+
+  draft.targetId = targetId;
+  draft.targetName = member
+    ? getMemberDisplayName(member, member.user)
+    : `<@${targetId}>`;
+
+  sanctionDrafts.set(interaction.user.id, draft);
+
+  await interaction.update({
+    embeds: [createDraftEmbed(draft)],
+    components: createDraftButtons(draft),
+  });
+
+  return true;
+}
+
+async function handleDraftButtons(client, interaction) {
   if (!interaction.isButton()) return false;
 
-  if (interaction.customId === "leader_create_sanction") {
-    if (!hasSanctionCreatorPermission(interaction.member)) {
+  const customId = interaction.customId;
+
+  if (![
+    "sanction_add_catalog",
+    "sanction_add_custom",
+    "sanction_finish",
+    "sanction_abort",
+  ].includes(customId)) {
+    return false;
+  }
+
+  if (!hasSanctionPermission(interaction.member)) {
+    await safeReply(interaction, {
+      content: "❌ Du hast keine Berechtigung, Sanktionen zu erstellen.",
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  const draft = getDraft(interaction.user.id);
+
+  if (!draft) {
+    await safeReply(interaction, {
+      content: "❌ Kein aktiver Sanktionsentwurf gefunden. Bitte starte erneut über das Leaderpanel.",
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  if (customId === "sanction_abort") {
+    sanctionDrafts.delete(interaction.user.id);
+
+    await interaction.update({
+      content: "❌ Sanktionsentwurf abgebrochen.",
+      embeds: [],
+      components: [],
+    });
+
+    return true;
+  }
+
+  if (customId === "sanction_add_catalog") {
+    await interaction.update({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(CONFIG.embedColor)
+          .setTitle("📚 • Sanktionskatalog")
+          .setDescription("Wähle eine Kategorie aus."),
+      ],
+      components: [createCategorySelectRow()],
+    });
+
+    return true;
+  }
+
+  if (customId === "sanction_add_custom") {
+    await interaction.showModal(createCustomSanctionModal());
+    return true;
+  }
+
+  if (customId === "sanction_finish") {
+    if (!draft.targetId || !draft.items.length) {
+      await safeReply(interaction, {
+        content: "❌ Bitte wähle zuerst eine Person und mindestens eine Sanktion aus.",
+        ephemeral: true,
+      });
+      return true;
+    }
+
+    await postSanction(client, interaction, draft);
+    return true;
+  }
+
+  return false;
+}
+
+async function handleCategorySelect(client, interaction) {
+  if (!interaction.isStringSelectMenu()) return false;
+  if (interaction.customId !== "sanction_category_select") return false;
+
+  if (!hasSanctionPermission(interaction.member)) {
+    await safeReply(interaction, {
+      content: "❌ Du hast keine Berechtigung, Sanktionen zu erstellen.",
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  const categoryId = interaction.values?.[0];
+  const category = getCategory(categoryId);
+
+  if (!category) {
+    await safeReply(interaction, {
+      content: "❌ Kategorie wurde nicht gefunden.",
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  await interaction.update({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(CONFIG.embedColor)
+        .setTitle(`${category.emoji} • ${category.label}`)
+        .setDescription("Wähle das Vergehen aus."),
+    ],
+    components: [createOffenseSelectRow(categoryId)],
+  });
+
+  return true;
+}
+
+async function handleOffenseSelect(client, interaction) {
+  if (!interaction.isStringSelectMenu()) return false;
+  if (!interaction.customId.startsWith("sanction_offense_select_")) return false;
+
+  if (!hasSanctionPermission(interaction.member)) {
+    await safeReply(interaction, {
+      content: "❌ Du hast keine Berechtigung, Sanktionen zu erstellen.",
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  const itemId = interaction.values?.[0];
+  const catalogItem = getCatalogItem(itemId);
+  const draft = getDraft(interaction.user.id);
+
+  if (!draft) {
+    await safeReply(interaction, {
+      content: "❌ Kein aktiver Sanktionsentwurf gefunden. Bitte starte erneut über das Leaderpanel.",
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  if (!catalogItem) {
+    await safeReply(interaction, {
+      content: "❌ Dieses Vergehen wurde nicht gefunden.",
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  if (catalogItem.manualAmount) {
+    await interaction.showModal(createManualAmountModal(catalogItem));
+    return true;
+  }
+
+  draft.items.push({
+    reason: catalogItem.label,
+    amount: Number(catalogItem.amount || 0),
+    special: catalogItem.special || null,
+    catalogId: catalogItem.id,
+  });
+
+  sanctionDrafts.set(interaction.user.id, draft);
+
+  await interaction.update({
+    embeds: [createDraftEmbed(draft)],
+    components: createDraftButtons(draft),
+  });
+
+  return true;
+}
+
+async function handleDraftModals(client, interaction) {
+  if (!interaction.isModalSubmit()) return false;
+
+  if (interaction.customId === "sanction_custom_modal") {
+    if (!hasSanctionPermission(interaction.member)) {
       await safeReply(interaction, {
         content: "❌ Du hast keine Berechtigung, Sanktionen zu erstellen.",
         ephemeral: true,
@@ -762,19 +1055,48 @@ async function handleSanctionButtons(client, interaction) {
       return true;
     }
 
-    createSanctionDraft(interaction.user.id);
+    const draft = getDraft(interaction.user.id);
+
+    if (!draft) {
+      await safeReply(interaction, {
+        content: "❌ Kein aktiver Sanktionsentwurf gefunden. Bitte starte erneut über das Leaderpanel.",
+        ephemeral: true,
+      });
+      return true;
+    }
+
+    const reason = cleanText(interaction.fields.getTextInputValue("sanction_reason"));
+    const amount = parseMoney(interaction.fields.getTextInputValue("sanction_amount"));
+    const special = cleanText(interaction.fields.getTextInputValue("sanction_special"), "");
+
+    if (!amount || amount <= 0) {
+      await safeReply(interaction, {
+        content: "❌ Bitte gib einen gültigen Betrag ein.",
+        ephemeral: true,
+      });
+      return true;
+    }
+
+    draft.items.push({
+      reason,
+      amount,
+      special: special || null,
+      catalogId: null,
+    });
+
+    sanctionDrafts.set(interaction.user.id, draft);
 
     await safeReply(interaction, {
-      content: createSanctionDraftText(interaction.user.id),
-      components: createSanctionBuilderComponents(interaction.user.id),
+      embeds: [createDraftEmbed(draft)],
+      components: createDraftButtons(draft),
       ephemeral: true,
     });
 
     return true;
   }
 
-  if (interaction.customId === "sanction_clear") {
-    if (!hasSanctionCreatorPermission(interaction.member)) {
+  if (interaction.customId.startsWith("sanction_amount_modal_")) {
+    if (!hasSanctionPermission(interaction.member)) {
       await safeReply(interaction, {
         content: "❌ Du hast keine Berechtigung, Sanktionen zu erstellen.",
         ephemeral: true,
@@ -782,97 +1104,42 @@ async function handleSanctionButtons(client, interaction) {
       return true;
     }
 
-    createSanctionDraft(interaction.user.id);
+    const itemId = interaction.customId.replace("sanction_amount_modal_", "");
+    const catalogItem = getCatalogItem(itemId);
+    const draft = getDraft(interaction.user.id);
 
-    await interaction.update({
-      content: createSanctionDraftText(interaction.user.id),
-      components: createSanctionBuilderComponents(interaction.user.id),
+    if (!draft || !catalogItem) {
+      await safeReply(interaction, {
+        content: "❌ Entwurf oder Katalogeintrag wurde nicht gefunden.",
+        ephemeral: true,
+      });
+      return true;
+    }
+
+    const amount = parseMoney(interaction.fields.getTextInputValue("sanction_amount"));
+    const specialInput = cleanText(interaction.fields.getTextInputValue("sanction_special"), "");
+
+    if (amount === null) {
+      await safeReply(interaction, {
+        content: "❌ Bitte gib einen gültigen Betrag ein.",
+        ephemeral: true,
+      });
+      return true;
+    }
+
+    draft.items.push({
+      reason: catalogItem.label,
+      amount,
+      special: specialInput || catalogItem.special || null,
+      catalogId: catalogItem.id,
     });
 
-    return true;
-  }
-
-  if (interaction.customId === "sanction_submit") {
-    if (!hasSanctionCreatorPermission(interaction.member)) {
-      await safeReply(interaction, {
-        content: "❌ Du hast keine Berechtigung, Sanktionen zu erstellen.",
-        ephemeral: true,
-      });
-      return true;
-    }
-
-    const draft = getSanctionDraft(interaction.user.id);
-    await createAndPostSanction(client, interaction, draft);
-    return true;
-  }
-
-  if (interaction.customId.startsWith("sanction_paid_")) {
-    const sanctionId = interaction.customId.replace("sanction_paid_", "");
-    await markSanctionPaid(client, interaction, sanctionId);
-    return true;
-  }
-
-  if (interaction.customId.startsWith("sanction_cancel_")) {
-    const sanctionId = interaction.customId.replace("sanction_cancel_", "");
-    await cancelSanction(client, interaction, sanctionId);
-    return true;
-  }
-
-  return false;
-}
-
-async function handleSanctionSelects(client, interaction) {
-  if (!interaction.isStringSelectMenu() && !interaction.isUserSelectMenu()) return false;
-
-  if (interaction.customId === "sanction_user_select") {
-    if (!hasSanctionCreatorPermission(interaction.member)) {
-      await safeReply(interaction, {
-        content: "❌ Du hast keine Berechtigung, Sanktionen zu erstellen.",
-        ephemeral: true,
-      });
-      return true;
-    }
-
-    const draft = getSanctionDraft(interaction.user.id);
-    draft.targetUserId = interaction.values?.[0] || null;
     sanctionDrafts.set(interaction.user.id, draft);
 
-    await interaction.update({
-      content: createSanctionDraftText(interaction.user.id),
-      components: createSanctionBuilderComponents(interaction.user.id),
-    });
-
-    return true;
-  }
-
-  if (
-    interaction.customId === "sanction_select_group1" ||
-    interaction.customId === "sanction_select_group2" ||
-    interaction.customId === "sanction_select_group3"
-  ) {
-    if (!hasSanctionCreatorPermission(interaction.member)) {
-      await safeReply(interaction, {
-        content: "❌ Du hast keine Berechtigung, Sanktionen zu erstellen.",
-        ephemeral: true,
-      });
-      return true;
-    }
-
-    const draft = getSanctionDraft(interaction.user.id);
-
-    const group =
-      interaction.customId === "sanction_select_group1"
-        ? "group1"
-        : interaction.customId === "sanction_select_group2"
-          ? "group2"
-          : "group3";
-
-    draft.selectedByMenu[group] = interaction.values || [];
-    sanctionDrafts.set(interaction.user.id, draft);
-
-    await interaction.update({
-      content: createSanctionDraftText(interaction.user.id),
-      components: createSanctionBuilderComponents(interaction.user.id),
+    await safeReply(interaction, {
+      embeds: [createDraftEmbed(draft)],
+      components: createDraftButtons(draft),
+      ephemeral: true,
     });
 
     return true;
@@ -880,21 +1147,142 @@ async function handleSanctionSelects(client, interaction) {
 
   return false;
 }
+
+// =====================================================
+// INTERACTIONS: POSTED SANCTIONS
+// =====================================================
+
+async function handlePostedSanctionButtons(client, interaction) {
+  if (!interaction.isButton()) return false;
+
+  const customId = interaction.customId;
+
+  let action = null;
+  let sanctionId = null;
+
+  if (customId.startsWith("sanction_paid_")) {
+    action = "paid";
+    sanctionId = customId.replace("sanction_paid_", "");
+  } else if (customId.startsWith("sanction_cancel_")) {
+    action = "cancel";
+    sanctionId = customId.replace("sanction_cancel_", "");
+  } else {
+    return false;
+  }
+
+  if (!hasSanctionPermission(interaction.member)) {
+    await safeReply(interaction, {
+      content: "❌ Du hast keine Berechtigung, diese Sanktion zu bearbeiten.",
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  const data = loadData();
+  const sanction = data.sanctions?.[sanctionId];
+
+  if (!sanction) {
+    await safeReply(interaction, {
+      content: "❌ Diese Sanktion wurde nicht im Speicher gefunden.",
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  if (sanction.status === "paid" || sanction.status === "cancelled") {
+    await safeReply(interaction, {
+      content: "ℹ️ Diese Sanktion ist bereits abgeschlossen.",
+      ephemeral: true,
+    });
+    return true;
+  }
+
+  if (action === "paid") {
+    sanction.status = "paid";
+    sanction.paidBy = interaction.user.id;
+    sanction.paidAt = Date.now();
+  }
+
+  if (action === "cancel") {
+    sanction.status = "cancelled";
+    sanction.cancelledBy = interaction.user.id;
+    sanction.cancelledAt = Date.now();
+  }
+
+  data.sanctions[sanctionId] = sanction;
+  saveData(data);
+
+  await updateSanctionMessage(client, sanction);
+
+  await safeReply(interaction, {
+    content: action === "paid"
+      ? "✅ Sanktion wurde als bezahlt markiert."
+      : "❌ Sanktion wurde storniert.",
+    ephemeral: true,
+  });
+
+  return true;
+}
+
+// =====================================================
+// OVERDUE CHECK
+// =====================================================
+
+async function checkOverdueSanctions(client) {
+  const data = loadData();
+  if (!data.sanctions) return;
+
+  let changed = false;
+
+  for (const [sanctionId, sanction] of Object.entries(data.sanctions)) {
+    if (!sanction) continue;
+    if (sanction.status !== "open") continue;
+    if (!sanction.dueAt || Date.now() < Number(sanction.dueAt)) continue;
+
+    sanction.status = "overdue";
+    sanction.overdueNotified = true;
+    data.sanctions[sanctionId] = sanction;
+    changed = true;
+
+    await updateSanctionMessage(client, sanction);
+
+    await sendToChannel(client, CONFIG.sanctionChannelId, {
+      content: [
+        `<@${sanction.targetId}>`,
+        "",
+        "⏰ **SANKTION ÜBERFÄLLIG**",
+        "",
+        `Die Sanktion **${sanction.id}** ist überfällig.`,
+        `Offener Betrag: **${formatMoney(sanction.totalAmount)}**`,
+      ].join("\n"),
+      allowedMentions: {
+        users: [sanction.targetId],
+      },
+    });
+  }
+
+  if (changed) saveData(data);
+}
+
+// =====================================================
+// MAIN HANDLER
+// =====================================================
 
 async function handleSanctionsInteraction(client, interaction) {
   if (await handleLeaderPanelCommand(client, interaction)) return true;
-  if (await handleSanctionButtons(client, interaction)) return true;
-  if (await handleSanctionSelects(client, interaction)) return true;
+  if (await handleCreateSanctionButton(client, interaction)) return true;
+  if (await handleTargetSelect(client, interaction)) return true;
+  if (await handleDraftButtons(client, interaction)) return true;
+  if (await handleCategorySelect(client, interaction)) return true;
+  if (await handleOffenseSelect(client, interaction)) return true;
+  if (await handleDraftModals(client, interaction)) return true;
+  if (await handlePostedSanctionButtons(client, interaction)) return true;
 
   return false;
 }
 
 module.exports = {
   leaderPanelCommand,
-  SANCTIONS,
-  SANCTION_MAP,
-  createLeaderPanelEmbed,
-  createLeaderPanelButtons,
   handleSanctionsInteraction,
   checkOverdueSanctions,
 };
