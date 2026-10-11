@@ -73,43 +73,35 @@ const SANCTION_CATALOG = [
     id: "weitergabe_infos",
     categoryId: "allgemein",
     label: "Weitergabe familieninterner Informationen oder Ausrüstung",
-    amount: 200000,
-    manualAmount: true,
-    special: "bis BLOODOUT",
+    note: "Schwere abhängig von Bedeutung/Gewicht der Informationen",
   },
   {
     id: "wochenabgabe_nicht_bezahlt",
     categoryId: "allgemein",
     label: "Wochenabgabe nicht bezahlt",
-    amount: 0,
-    manualAmount: true,
-    special: "50% der Wochenabgabe + Nachzahlung",
+    note: "Nachzahlung berücksichtigen",
   },
   {
     id: "sanktion_nicht_bezahlt",
     categoryId: "allgemein",
     label: "Sanktion nicht bezahlt",
-    amount: 100000,
-    special: "Nachzahlung der Sanktion",
+    note: "Nachzahlung der Sanktion berücksichtigen",
   },
   {
     id: "kein_mindestbestand",
     categoryId: "allgemein",
     label: "Kein Mindestbestand",
-    amount: 50000,
   },
   {
     id: "fahrzeuge_abgeschlossen",
     categoryId: "allgemein",
     label: "Familienfahrzeuge bei Familienaktionen oder auf Route abgeschlossen",
-    amount: 50000,
   },
   {
     id: "langwaffe_verloren",
     categoryId: "allgemein",
     label: "Verlust einer Langwaffe durch Eigenverschulden",
-    amount: 100000,
-    special: "Wert der Waffe",
+    note: "Wert der Waffe berücksichtigen",
   },
 
   // II. INTERNES VERHALTEN
@@ -117,59 +109,44 @@ const SANCTION_CATALOG = [
     id: "anordnungen_ignoriert",
     categoryId: "intern",
     label: "Ignorieren von Anordnungen der Leaderschaft oder Hochrangigen",
-    amount: 300000,
-    manualAmount: true,
-    special: "bis BLOODOUT",
+    note: "Bis BLOODOUT möglich",
   },
   {
     id: "respektlos_leaderschaft",
     categoryId: "intern",
     label: "Respektloses Verhalten gegenüber Leaderschaft / Höherrangigen",
-    amount: 100000,
-    manualAmount: true,
-    maxAmount: 400000,
   },
   {
     id: "beleidigung_intern",
     categoryId: "intern",
     label: "Beleidigungen innerhalb der Familie, die zu weit gehen",
-    amount: 100000,
-    manualAmount: true,
-    maxAmount: 300000,
   },
   {
     id: "nicht_aufhoeren",
     categoryId: "intern",
     label: "Trotz mehrfacher Aufforderung nicht aufhören",
-    amount: 50000,
   },
   {
     id: "provokation_ragebaiting",
     categoryId: "intern",
     label: "Starke Provokation und Rage-Baiting",
-    amount: 50000,
   },
   {
     id: "familie_laecherlich",
     categoryId: "intern",
     label: "Die Familie lächerlich dastehen lassen",
-    amount: 0,
-    manualAmount: true,
-    special: "BLOODOUT",
+    note: "BLOODOUT möglich",
   },
   {
     id: "schiessen_familienmitglied",
     categoryId: "intern",
     label: "Schießen auf Familienmitglieder",
-    amount: 500000,
   },
   {
     id: "toeten_familienmitglied",
     categoryId: "intern",
     label: "Töten eines Familienmitglieds",
-    amount: 0,
-    manualAmount: true,
-    special: "BLOODOUT",
+    note: "BLOODOUT möglich",
   },
 
   // III. AUFSTELLUNG & ANWESENHEIT
@@ -177,15 +154,11 @@ const SANCTION_CATALOG = [
     id: "nicht_abmelden",
     categoryId: "aufstellung",
     label: "Nicht-Abmelden bei einer Aufstellung",
-    amount: 100000,
   },
   {
     id: "nicht_rechtzeitig_aufstellung",
     categoryId: "aufstellung",
     label: "Nicht rechtzeitig zur Aufstellung am Aufstellungsort sein",
-    amount: 50000,
-    manualAmount: true,
-    maxAmount: 150000,
   },
 
   // IV. EXTERNES VERHALTEN
@@ -193,32 +166,24 @@ const SANCTION_CATALOG = [
     id: "beleidigung_extern",
     categoryId: "extern",
     label: "Beleidigungen außerhalb der Familie, die zu weit gehen",
-    amount: 500000,
-    special: "Entschuldigung bei der betroffenen Familie",
+    note: "Entschuldigung bei der betroffenen Familie möglich",
   },
   {
     id: "unangemessenes_benehmen",
     categoryId: "extern",
     label: "Unangebrachtes Benehmen bei wichtigen Meetings / Besprechungen",
-    amount: 50000,
-    manualAmount: true,
-    maxAmount: 250000,
   },
   {
     id: "stress_extern",
     categoryId: "extern",
     label: "Stress außerhalb der Familie provozieren",
-    amount: 100000,
-    manualAmount: true,
-    special: "bis BLOODOUT",
+    note: "Bis BLOODOUT möglich",
   },
   {
     id: "zivi_action",
     categoryId: "extern",
     label: "Zivi-Action fällt auf die Familie zurück",
-    amount: 100000,
-    manualAmount: true,
-    special: "bis BLOODOUT",
+    note: "Bis BLOODOUT möglich",
   },
 
   // V. KOMMUNIKATION
@@ -226,21 +191,16 @@ const SANCTION_CATALOG = [
     id: "funkpflicht_missachtet",
     categoryId: "kommunikation",
     label: "Funkpflicht missachtet",
-    amount: 50000,
   },
   {
     id: "funkdisziplin_missachtet",
     categoryId: "kommunikation",
     label: "Funkdisziplin missachtet",
-    amount: 50000,
-    manualAmount: true,
-    maxAmount: 150000,
   },
   {
     id: "kein_gps_tracker",
     categoryId: "kommunikation",
     label: "Keinen GPS-Tracker bei sich tragen",
-    amount: 100000,
   },
 
   // VI. HAUSORDNUNG
@@ -248,13 +208,11 @@ const SANCTION_CATALOG = [
     id: "tueren_tore_nicht_abgeschlossen",
     categoryId: "hausordnung",
     label: "Nicht abschließen der Türen / Tore",
-    amount: 50000,
   },
   {
     id: "zu_schnell_anwesen",
     categoryId: "hausordnung",
     label: "Zu schnelles Fahren im Anwesen (> 100)",
-    amount: 50000,
   },
 ];
 
@@ -262,15 +220,14 @@ const SANCTION_CATALOG = [
 // HELPER
 // =====================================================
 
-function formatMoney(amount) {
-  return `${Number(amount || 0).toLocaleString("de-DE")}$`;
+function formatMetal(amount) {
+  return `${Number(amount || 0).toLocaleString("de-DE")}x Metall`;
 }
 
-function parseMoney(input) {
+function parseMetal(input) {
   const cleaned = String(input || "")
     .replace(/\./g, "")
     .replace(/,/g, "")
-    .replace(/\$/g, "")
     .replace(/[^\d]/g, "");
 
   const amount = Number(cleaned);
@@ -302,25 +259,6 @@ function getCategory(categoryId) {
 
 function getCatalogItemsByCategory(categoryId) {
   return SANCTION_CATALOG.filter((item) => item.categoryId === categoryId);
-}
-
-function getAmountText(item) {
-  if (!item) return "—";
-
-  if (item.special === "BLOODOUT" && !item.amount) {
-    return "BLOODOUT";
-  }
-
-  if (item.maxAmount) {
-    return `${formatMoney(item.amount)} - ${formatMoney(item.maxAmount)}`;
-  }
-
-  if (item.special) {
-    if (item.amount) return `${formatMoney(item.amount)} + ${item.special}`;
-    return item.special;
-  }
-
-  return formatMoney(item.amount);
 }
 
 function getMemberDisplayName(member, user) {
@@ -363,7 +301,7 @@ function createNewDraft(userId) {
 }
 
 function getDraftTotal(draft) {
-  return (draft?.items || []).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  return (draft?.items || []).reduce((sum, item) => sum + Number(item.metalAmount || 0), 0);
 }
 
 function formatDraftItems(items = []) {
@@ -374,8 +312,8 @@ function formatDraftItems(items = []) {
       const isLast = index === items.length - 1;
       const prefix = isLast ? "┖" : "┃";
 
-      const specialText = item.special ? ` + ${item.special}` : "";
-      return `${prefix} ${item.reason} — ${formatMoney(item.amount)}${specialText}`;
+      const noteText = item.note ? ` (${item.note})` : "";
+      return `${prefix} ${item.reason} — ${formatMetal(item.metalAmount)}${noteText}`;
     })
     .join("\n")
     .slice(0, 1000);
@@ -389,8 +327,8 @@ function formatFinalSanctionItems(items = []) {
       const isLast = index === items.length - 1;
       const prefix = isLast ? "┖" : "┃";
 
-      const specialText = item.special ? ` + ${item.special}` : "";
-      return `${prefix} ${item.reason} — ${formatMoney(item.amount)}${specialText}`;
+      const noteText = item.note ? ` (${item.note})` : "";
+      return `${prefix} ${item.reason} — ${formatMetal(item.metalAmount)}${noteText}`;
     })
     .join("\n")
     .slice(0, 1000);
@@ -486,7 +424,7 @@ function createDraftEmbed(draft) {
         "**Ausgewählte Vergehen:**",
         formatDraftItems(draft.items),
         "",
-        `**Gesamtbetrag:** ${formatMoney(getDraftTotal(draft))}`,
+        `**Gesamtabgabe:** ${formatMetal(getDraftTotal(draft))}`,
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
     )
@@ -562,7 +500,7 @@ function createOffenseSelectRow(categoryId) {
         items.map((item) => ({
           label: item.label.slice(0, 100),
           value: item.id,
-          description: getAmountText(item).slice(0, 100),
+          description: "Metall-Menge wird danach manuell eingetragen.",
         }))
       )
   );
@@ -582,57 +520,57 @@ function createCustomSanctionModal() {
     .setMaxLength(100)
     .setRequired(true);
 
-  const amountInput = new TextInputBuilder()
-    .setCustomId("sanction_amount")
-    .setLabel("Betrag")
-    .setPlaceholder("z. B. 75000")
+  const metalInput = new TextInputBuilder()
+    .setCustomId("sanction_metal")
+    .setLabel("Metall-Menge")
+    .setPlaceholder("z. B. 500")
     .setStyle(TextInputStyle.Short)
     .setMinLength(1)
     .setMaxLength(15)
     .setRequired(true);
 
   const noteInput = new TextInputBuilder()
-    .setCustomId("sanction_special")
-    .setLabel("Zusatz / Sonderstrafe optional")
-    .setPlaceholder("z. B. BLOODOUT oder leer lassen")
+    .setCustomId("sanction_note")
+    .setLabel("Zusatz optional")
+    .setPlaceholder("z. B. BLOODOUT, Entschuldigung, leer lassen")
     .setStyle(TextInputStyle.Short)
     .setMaxLength(100)
     .setRequired(false);
 
   modal.addComponents(
     new ActionRowBuilder().addComponents(reasonInput),
-    new ActionRowBuilder().addComponents(amountInput),
+    new ActionRowBuilder().addComponents(metalInput),
     new ActionRowBuilder().addComponents(noteInput)
   );
 
   return modal;
 }
 
-function createManualAmountModal(item) {
+function createMetalAmountModal(item) {
   const modal = new ModalBuilder()
-    .setCustomId(`sanction_amount_modal_${item.id}`)
-    .setTitle("💵 Betrag festlegen");
+    .setCustomId(`sanction_metal_modal_${item.id}`)
+    .setTitle("🪙 Metall-Menge festlegen");
 
-  const amountInput = new TextInputBuilder()
-    .setCustomId("sanction_amount")
-    .setLabel("Endgültiger Betrag")
-    .setPlaceholder(`z. B. ${item.amount || 100000}`)
+  const metalInput = new TextInputBuilder()
+    .setCustomId("sanction_metal")
+    .setLabel("Metall-Menge")
+    .setPlaceholder("z. B. 500")
     .setStyle(TextInputStyle.Short)
     .setMinLength(1)
     .setMaxLength(15)
     .setRequired(true);
 
-  const specialInput = new TextInputBuilder()
-    .setCustomId("sanction_special")
-    .setLabel("Zusatz / Sonderstrafe optional")
-    .setPlaceholder(item.special || "z. B. BLOODOUT oder leer lassen")
+  const noteInput = new TextInputBuilder()
+    .setCustomId("sanction_note")
+    .setLabel("Zusatz optional")
+    .setPlaceholder(item.note || "z. B. BLOODOUT, Entschuldigung, leer lassen")
     .setStyle(TextInputStyle.Short)
     .setMaxLength(100)
     .setRequired(false);
 
   modal.addComponents(
-    new ActionRowBuilder().addComponents(amountInput),
-    new ActionRowBuilder().addComponents(specialInput)
+    new ActionRowBuilder().addComponents(metalInput),
+    new ActionRowBuilder().addComponents(noteInput)
   );
 
   return modal;
@@ -678,7 +616,7 @@ function createSanctionEmbed(sanction) {
     "**Vergehen:**",
     formatFinalSanctionItems(sanction.items),
     "",
-    `**Gesamtbetrag:** ${formatMoney(sanction.totalAmount)}`,
+    `**Gesamtabgabe:** ${formatMetal(sanction.totalMetal)}`,
     `**Frist:** <t:${getUnixTimestamp(sanction.dueAt)}:R>`,
     "━━━━━━━━━━━━━━━━━━━━",
   ];
@@ -735,7 +673,8 @@ async function postSanction(client, interaction, draft) {
     targetName: draft.targetName,
     creatorId: draft.creatorId,
     items: draft.items,
-    totalAmount: getDraftTotal(draft),
+    totalMetal: getDraftTotal(draft),
+    totalAmount: 0,
     status: "open",
     createdAt: Date.now(),
     dueAt: getDueAt(),
@@ -773,7 +712,7 @@ async function postSanction(client, interaction, draft) {
   sanctionDrafts.delete(interaction.user.id);
 
   return safeReply(interaction, {
-    content: `✅ Sanktion wurde in <#${CONFIG.sanctionChannelId}> erstellt.\n💵 Gesamtbetrag: **${formatMoney(sanction.totalAmount)}**`,
+    content: `✅ Sanktion wurde in <#${CONFIG.sanctionChannelId}> erstellt.\n🪙 Gesamtabgabe: **${formatMetal(sanction.totalMetal)}**`,
     ephemeral: true,
   });
 }
@@ -981,7 +920,7 @@ async function handleCategorySelect(client, interaction) {
       new EmbedBuilder()
         .setColor(CONFIG.embedColor)
         .setTitle(`${category.emoji} • ${category.label}`)
-        .setDescription("Wähle das Vergehen aus."),
+        .setDescription("Wähle das Vergehen aus. Die Metall-Menge wird danach manuell eingetragen."),
     ],
     components: [createOffenseSelectRow(categoryId)],
   });
@@ -1003,15 +942,6 @@ async function handleOffenseSelect(client, interaction) {
 
   const itemId = interaction.values?.[0];
   const catalogItem = getCatalogItem(itemId);
-  const draft = getDraft(interaction.user.id);
-
-  if (!draft) {
-    await safeReply(interaction, {
-      content: "❌ Kein aktiver Sanktionsentwurf gefunden. Bitte starte erneut über das Leaderpanel.",
-      ephemeral: true,
-    });
-    return true;
-  }
 
   if (!catalogItem) {
     await safeReply(interaction, {
@@ -1021,25 +951,7 @@ async function handleOffenseSelect(client, interaction) {
     return true;
   }
 
-  if (catalogItem.manualAmount) {
-    await interaction.showModal(createManualAmountModal(catalogItem));
-    return true;
-  }
-
-  draft.items.push({
-    reason: catalogItem.label,
-    amount: Number(catalogItem.amount || 0),
-    special: catalogItem.special || null,
-    catalogId: catalogItem.id,
-  });
-
-  sanctionDrafts.set(interaction.user.id, draft);
-
-  await interaction.update({
-    embeds: [createDraftEmbed(draft)],
-    components: createDraftButtons(draft),
-  });
-
+  await interaction.showModal(createMetalAmountModal(catalogItem));
   return true;
 }
 
@@ -1066,12 +978,12 @@ async function handleDraftModals(client, interaction) {
     }
 
     const reason = cleanText(interaction.fields.getTextInputValue("sanction_reason"));
-    const amount = parseMoney(interaction.fields.getTextInputValue("sanction_amount"));
-    const special = cleanText(interaction.fields.getTextInputValue("sanction_special"), "");
+    const metalAmount = parseMetal(interaction.fields.getTextInputValue("sanction_metal"));
+    const note = cleanText(interaction.fields.getTextInputValue("sanction_note"), "");
 
-    if (!amount || amount <= 0) {
+    if (!metalAmount || metalAmount <= 0) {
       await safeReply(interaction, {
-        content: "❌ Bitte gib einen gültigen Betrag ein.",
+        content: "❌ Bitte gib eine gültige Metall-Menge ein.",
         ephemeral: true,
       });
       return true;
@@ -1079,8 +991,9 @@ async function handleDraftModals(client, interaction) {
 
     draft.items.push({
       reason,
-      amount,
-      special: special || null,
+      metalAmount,
+      amount: 0,
+      note: note || null,
       catalogId: null,
     });
 
@@ -1095,7 +1008,7 @@ async function handleDraftModals(client, interaction) {
     return true;
   }
 
-  if (interaction.customId.startsWith("sanction_amount_modal_")) {
+  if (interaction.customId.startsWith("sanction_metal_modal_")) {
     if (!hasSanctionPermission(interaction.member)) {
       await safeReply(interaction, {
         content: "❌ Du hast keine Berechtigung, Sanktionen zu erstellen.",
@@ -1104,7 +1017,7 @@ async function handleDraftModals(client, interaction) {
       return true;
     }
 
-    const itemId = interaction.customId.replace("sanction_amount_modal_", "");
+    const itemId = interaction.customId.replace("sanction_metal_modal_", "");
     const catalogItem = getCatalogItem(itemId);
     const draft = getDraft(interaction.user.id);
 
@@ -1116,12 +1029,12 @@ async function handleDraftModals(client, interaction) {
       return true;
     }
 
-    const amount = parseMoney(interaction.fields.getTextInputValue("sanction_amount"));
-    const specialInput = cleanText(interaction.fields.getTextInputValue("sanction_special"), "");
+    const metalAmount = parseMetal(interaction.fields.getTextInputValue("sanction_metal"));
+    const noteInput = cleanText(interaction.fields.getTextInputValue("sanction_note"), "");
 
-    if (amount === null) {
+    if (!metalAmount || metalAmount <= 0) {
       await safeReply(interaction, {
-        content: "❌ Bitte gib einen gültigen Betrag ein.",
+        content: "❌ Bitte gib eine gültige Metall-Menge ein.",
         ephemeral: true,
       });
       return true;
@@ -1129,8 +1042,9 @@ async function handleDraftModals(client, interaction) {
 
     draft.items.push({
       reason: catalogItem.label,
-      amount,
-      special: specialInput || catalogItem.special || null,
+      metalAmount,
+      amount: 0,
+      note: noteInput || catalogItem.note || null,
       catalogId: catalogItem.id,
     });
 
@@ -1253,7 +1167,7 @@ async function checkOverdueSanctions(client) {
         "⏰ **SANKTION ÜBERFÄLLIG**",
         "",
         `Die Sanktion **${sanction.id}** ist überfällig.`,
-        `Offener Betrag: **${formatMoney(sanction.totalAmount)}**`,
+        `Offene Abgabe: **${formatMetal(sanction.totalMetal || 0)}**`,
       ].join("\n"),
       allowedMentions: {
         users: [sanction.targetId],
