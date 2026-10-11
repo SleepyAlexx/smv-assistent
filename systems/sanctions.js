@@ -249,6 +249,20 @@ function getDueAt() {
   return Date.now() + days * 24 * 60 * 60 * 1000;
 }
 
+function formatDateTime(ms) {
+  if (!ms) return "—";
+
+  return new Date(ms).toLocaleString("de-DE", {
+    timeZone: CONFIG.timezone || "Europe/Berlin",
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function getCatalogItem(itemId) {
   return SANCTION_CATALOG.find((item) => item.id === itemId) || null;
 }
@@ -304,6 +318,12 @@ function getDraftTotal(draft) {
   return (draft?.items || []).reduce((sum, item) => sum + Number(item.metalAmount || 0), 0);
 }
 
+function getSanctionTotalMetal(sanction) {
+  if (typeof sanction.totalMetal === "number") return sanction.totalMetal;
+
+  return (sanction?.items || []).reduce((sum, item) => sum + Number(item.metalAmount || 0), 0);
+}
+
 function formatDraftItems(items = []) {
   if (!items.length) {
     return "┖ Noch keine Sanktion ausgewählt";
@@ -324,20 +344,25 @@ function formatDraftItems(items = []) {
 }
 
 function formatFinalSanctionItems(items = []) {
-  if (!items.length) return "┖ Keine Vergehen eingetragen";
+  if (!items.length) return "Keine Vergehen eingetragen";
 
   return items
     .map((item, index) => {
-      const number = index + 1;
-      const noteText = item.note ? `\n   └ Zusatz: ${item.note}` : "";
-
-      return [
-        `**${number}. ${item.reason}**`,
-        `   └ ${formatMetal(item.metalAmount)}${noteText}`,
-      ].join("\n");
+      const noteText = item.note ? `\n   Zusatz: ${item.note}` : "";
+      return `${index + 1}. ${item.reason} — ${formatMetal(item.metalAmount)}${noteText}`;
     })
-    .join("\n\n")
-    .slice(0, 1200);
+    .join("\n")
+    .slice(0, 1024);
+}
+
+function getSpecialPunishments(items = []) {
+  const notes = items
+    .map((item) => item.note)
+    .filter(Boolean);
+
+  if (!notes.length) return "Keine";
+
+  return notes.join("\n").slice(0, 1024);
 }
 
 // =====================================================
@@ -609,12 +634,13 @@ function getSanctionStatusEmoji(sanction) {
   if (sanction.status === "paid") return "✅";
   if (sanction.status === "cancelled") return "❌";
   if (sanction.status === "overdue") return "⏰";
-  return "⚠️";
+  return "⏳";
 }
 
 function createSanctionEmbed(sanction) {
   const statusText = getSanctionStatusText(sanction);
   const statusEmoji = getSanctionStatusEmoji(sanction);
+  const totalMetal = getSanctionTotalMetal(sanction);
 
   const color =
     sanction.status === "paid"
@@ -623,53 +649,73 @@ function createSanctionEmbed(sanction) {
         ? CONFIG.dangerColor
         : sanction.status === "overdue"
           ? CONFIG.warningColor
-          : CONFIG.embedColor;
+          : CONFIG.warningColor;
 
-  const lines = [
-    "━━━━━━━━━━━━━━━━━━━━",
-    "",
-    "👤 **BETROFFENE PERSON**",
-    `┖ <@${sanction.targetId}>`,
-    "",
-    "👑 **AUSGESTELLT VON**",
-    `┖ <@${sanction.creatorId}>`,
-    "",
-    "📌 **STATUS**",
-    `┖ ${statusEmoji} **${statusText}**`,
-    "",
-    "📋 **VERGEHEN**",
-    formatFinalSanctionItems(sanction.items),
-    "",
-    "━━━━━━━━━━━━━━━━━━━━",
-    "",
-    "🪙 **GESAMTABGABE**",
-    `┖ **${formatMetal(sanction.totalMetal)}**`,
-    "",
-    "⏳ **FRIST**",
-    `┖ <t:${getUnixTimestamp(sanction.dueAt)}:R>`,
-    "",
-    "━━━━━━━━━━━━━━━━━━━━",
-  ];
-
-  if (sanction.status === "paid") {
-    lines.push("");
-    lines.push("✅ **BEZAHLT**");
-    lines.push(`┖ Von <@${sanction.paidBy}> am <t:${getUnixTimestamp(sanction.paidAt)}:F>`);
-  }
-
-  if (sanction.status === "cancelled") {
-    lines.push("");
-    lines.push("❌ **STORNIERT**");
-    lines.push(`┖ Von <@${sanction.cancelledBy}> am <t:${getUnixTimestamp(sanction.cancelledAt)}:F>`);
-  }
-
-  return new EmbedBuilder()
+  const embed = new EmbedBuilder()
     .setColor(color)
-    .setTitle(`${statusEmoji} • SMV SANKTION`)
-    .setDescription(lines.join("\n"))
+    .setTitle(`${statusEmoji === "⏳" ? "🚫" : statusEmoji} SANKTION ${statusEmoji === "⏳" ? "🚫" : statusEmoji}`)
+    .addFields(
+      {
+        name: "Name",
+        value: `<@${sanction.targetId}>`,
+        inline: false,
+      },
+      {
+        name: "Sanktion",
+        value: formatFinalSanctionItems(sanction.items),
+        inline: false,
+      },
+      {
+        name: "Zu Bezahlen",
+        value: `**${formatMetal(totalMetal)}**`,
+        inline: true,
+      },
+      {
+        name: "Sonderstrafe",
+        value: getSpecialPunishments(sanction.items),
+        inline: true,
+      },
+      {
+        name: "Zeitraum",
+        value: [
+          `Erstellt: ${formatDateTime(sanction.createdAt)}`,
+          `Frist: ${formatDateTime(sanction.dueAt)}`,
+          `Restzeit: <t:${getUnixTimestamp(sanction.dueAt)}:R>`,
+        ].join("\n"),
+        inline: false,
+      },
+      {
+        name: "Ausgestellt von",
+        value: `<@${sanction.creatorId}>`,
+        inline: true,
+      },
+      {
+        name: "Status",
+        value: `${statusEmoji} ${statusText}`,
+        inline: true,
+      }
+    )
     .setFooter({
       text: `${CONFIG.shortName} • Sanktions-ID: ${sanction.id}`,
     });
+
+  if (sanction.status === "paid") {
+    embed.addFields({
+      name: "Bezahlt",
+      value: `Von <@${sanction.paidBy}> am ${formatDateTime(sanction.paidAt)}`,
+      inline: false,
+    });
+  }
+
+  if (sanction.status === "cancelled") {
+    embed.addFields({
+      name: "Storniert",
+      value: `Von <@${sanction.cancelledBy}> am ${formatDateTime(sanction.cancelledAt)}`,
+      inline: false,
+    });
+  }
+
+  return embed;
 }
 
 function createSanctionButtons(sanction) {
@@ -678,7 +724,7 @@ function createSanctionButtons(sanction) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`sanction_paid_${sanction.id}`)
-      .setLabel("Bezahlt")
+      .setLabel("Bezahlt markieren")
       .setEmoji("✅")
       .setStyle(ButtonStyle.Success)
       .setDisabled(isDone),
@@ -1197,7 +1243,7 @@ async function checkOverdueSanctions(client) {
         "⏰ **SANKTION ÜBERFÄLLIG**",
         "",
         `Die Sanktion **${sanction.id}** ist überfällig.`,
-        `Offene Abgabe: **${formatMetal(sanction.totalMetal || 0)}**`,
+        `Offene Abgabe: **${formatMetal(getSanctionTotalMetal(sanction))}**`,
       ].join("\n"),
       allowedMentions: {
         users: [sanction.targetId],
