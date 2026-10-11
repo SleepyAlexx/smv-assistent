@@ -305,17 +305,21 @@ function getDraftTotal(draft) {
 }
 
 function formatDraftItems(items = []) {
-  if (!items.length) return "┖ Noch keine Sanktion ausgewählt";
+  if (!items.length) {
+    return "┖ Noch keine Sanktion ausgewählt";
+  }
 
   return items
     .map((item, index) => {
-      const isLast = index === items.length - 1;
-      const prefix = isLast ? "┖" : "┃";
+      const number = index + 1;
+      const noteText = item.note ? `\n   └ Zusatz: ${item.note}` : "";
 
-      const noteText = item.note ? ` (${item.note})` : "";
-      return `${prefix} ${item.reason} — ${formatMetal(item.metalAmount)}${noteText}`;
+      return [
+        `**${number}. ${item.reason}**`,
+        `   └ ${formatMetal(item.metalAmount)}${noteText}`,
+      ].join("\n");
     })
-    .join("\n")
+    .join("\n\n")
     .slice(0, 1000);
 }
 
@@ -413,18 +417,30 @@ function createTargetSelectRow() {
 }
 
 function createDraftEmbed(draft) {
+  const personText = draft.targetId
+    ? `<@${draft.targetId}>`
+    : "Noch nicht ausgewählt";
+
+  const totalMetal = getDraftTotal(draft);
+
   return new EmbedBuilder()
     .setColor(CONFIG.warningColor)
-    .setTitle("⚠️ • SANKTION ERSTELLEN")
+    .setTitle("⚠️ • SANKTIONSENTWURF")
     .setDescription(
       [
         "━━━━━━━━━━━━━━━━━━━━",
-        `Betroffene Person: ${draft.targetId ? `<@${draft.targetId}>` : "Noch nicht ausgewählt"}`,
         "",
-        "**Ausgewählte Vergehen:**",
+        "👤 **BETROFFENE PERSON**",
+        `┖ ${personText}`,
+        "",
+        "📋 **AUSGEWÄHLTE VERGEHEN**",
         formatDraftItems(draft.items),
         "",
-        `**Gesamtabgabe:** ${formatMetal(getDraftTotal(draft))}`,
+        "━━━━━━━━━━━━━━━━━━━━",
+        "",
+        "🪙 **GESAMTABGABE**",
+        `┖ **${formatMetal(totalMetal)}**`,
+        "",
         "━━━━━━━━━━━━━━━━━━━━",
       ].join("\n")
     )
