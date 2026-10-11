@@ -237,7 +237,7 @@ function parseMetal(input) {
 }
 
 function createShortSanctionId() {
-  return `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  return `smv${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 }
 
 function getUnixTimestamp(ms) {
@@ -324,18 +324,20 @@ function formatDraftItems(items = []) {
 }
 
 function formatFinalSanctionItems(items = []) {
-  if (!items.length) return "—";
+  if (!items.length) return "┖ Keine Vergehen eingetragen";
 
   return items
     .map((item, index) => {
-      const isLast = index === items.length - 1;
-      const prefix = isLast ? "┖" : "┃";
+      const number = index + 1;
+      const noteText = item.note ? `\n   └ Zusatz: ${item.note}` : "";
 
-      const noteText = item.note ? ` (${item.note})` : "";
-      return `${prefix} ${item.reason} — ${formatMetal(item.metalAmount)}${noteText}`;
+      return [
+        `**${number}. ${item.reason}**`,
+        `   └ ${formatMetal(item.metalAmount)}${noteText}`,
+      ].join("\n");
     })
-    .join("\n")
-    .slice(0, 1000);
+    .join("\n\n")
+    .slice(0, 1200);
 }
 
 // =====================================================
@@ -625,28 +627,40 @@ function createSanctionEmbed(sanction) {
 
   const lines = [
     "━━━━━━━━━━━━━━━━━━━━",
-    `Betroffene Person: <@${sanction.targetId}>`,
-    `Ausgestellt von: <@${sanction.creatorId}>`,
-    `Status: ${statusEmoji} **${statusText}**`,
     "",
-    "**Vergehen:**",
+    "👤 **BETROFFENE PERSON**",
+    `┖ <@${sanction.targetId}>`,
+    "",
+    "👑 **AUSGESTELLT VON**",
+    `┖ <@${sanction.creatorId}>`,
+    "",
+    "📌 **STATUS**",
+    `┖ ${statusEmoji} **${statusText}**`,
+    "",
+    "📋 **VERGEHEN**",
     formatFinalSanctionItems(sanction.items),
     "",
-    `**Gesamtabgabe:** ${formatMetal(sanction.totalMetal)}`,
-    `**Frist:** <t:${getUnixTimestamp(sanction.dueAt)}:R>`,
+    "━━━━━━━━━━━━━━━━━━━━",
+    "",
+    "🪙 **GESAMTABGABE**",
+    `┖ **${formatMetal(sanction.totalMetal)}**`,
+    "",
+    "⏳ **FRIST**",
+    `┖ <t:${getUnixTimestamp(sanction.dueAt)}:R>`,
+    "",
     "━━━━━━━━━━━━━━━━━━━━",
   ];
 
   if (sanction.status === "paid") {
     lines.push("");
-    lines.push(`✅ **Bezahlt von:** <@${sanction.paidBy}>`);
-    lines.push(`🕘 **Bezahlt am:** <t:${getUnixTimestamp(sanction.paidAt)}:F>`);
+    lines.push("✅ **BEZAHLT**");
+    lines.push(`┖ Von <@${sanction.paidBy}> am <t:${getUnixTimestamp(sanction.paidAt)}:F>`);
   }
 
   if (sanction.status === "cancelled") {
     lines.push("");
-    lines.push(`❌ **Storniert von:** <@${sanction.cancelledBy}>`);
-    lines.push(`🕘 **Storniert am:** <t:${getUnixTimestamp(sanction.cancelledAt)}:F>`);
+    lines.push("❌ **STORNIERT**");
+    lines.push(`┖ Von <@${sanction.cancelledBy}> am <t:${getUnixTimestamp(sanction.cancelledAt)}:F>`);
   }
 
   return new EmbedBuilder()
