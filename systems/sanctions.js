@@ -347,11 +347,15 @@ function formatFinalSanctionItems(items = []) {
   if (!items.length) return "Keine Vergehen eingetragen";
 
   return items
-    .map((item, index) => {
-      const noteText = item.note ? `\n   Zusatz: ${item.note}` : "";
-      return `${index + 1}. ${item.reason} — ${formatMetal(item.metalAmount)}${noteText}`;
+    .map((item) => {
+      const noteText = item.note ? `\n┖ Zusatz: ${item.note}` : "";
+
+      return [
+        `**${item.reason}**`,
+        `┖ ${formatMetal(item.metalAmount)}${noteText}`,
+      ].join("\n");
     })
-    .join("\n")
+    .join("\n\n")
     .slice(0, 1024);
 }
 
